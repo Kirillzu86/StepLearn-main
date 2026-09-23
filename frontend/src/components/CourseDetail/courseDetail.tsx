@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
-import { API_URL } from "../../api/api";
+import { API_URL, completeLesson } from "../../api/api";
 import { useParams, Link } from "react-router-dom";
 import { marked } from "marked";
+import { FiLock, FiUnlock, FiCheckCircle, FiUsers, FiArrowRight } from "react-icons/fi";
 import Header from "../Header/Header";
 import Sidebar from "../Sidebar/sidebar";
 import "../HomePage/StyleHomePage.css";
@@ -22,6 +23,23 @@ interface Question {
   answers: Answer[];
 }
 
+interface LessonData {
+  id: number;
+  title: string;
+  description?: string;
+  content: string;
+  order: number;
+  is_locked?: boolean;
+  lock_reason?: string;
+  is_completed?: boolean;
+  group_progress_info?: {
+    prev_lesson_title: string;
+    passed_students: number;
+    total_students: number;
+    completion_percentage: number;
+  };
+}
+
 interface CourseDetailData {
   id: number;
   title: string;
@@ -30,6 +48,8 @@ interface CourseDetailData {
   course_type?: string;
   content?: string;
   questions: Question[];
+  lessons?: LessonData[];
+  group_info?: { id: number; name: string } | null;
 }
 
 interface CourseDetailProps {
@@ -59,67 +79,106 @@ function CourseDetail({ theme, toggleTheme }: CourseDetailProps) {
   const [showPayment, setShowPayment] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
 
-  useEffect(() => {
-    const fetchCourse = async () => {
-      try {
-        const base = API_URL.replace(/\/$/, "");
-        const response = await axios.get<CourseDetailData>(`${base}/api/v1/course/${id}`);
-        const courseData = response.data;
-        if (courseData) {
-          courseData.questions = Array.isArray(courseData.questions) ? courseData.questions : [];
-        }
-        setCourse(courseData);
+  // Состояния модулей (Stepik / Cisco Gating)
+  const [activeLessonId, setActiveLessonId] = useState<number | null>(null);
+  const [unlockBanner, setUnlockBanner] = useState<string | null>(null);
 
-        // Проверяем запись на курс и сохраненный прогресс
-        const userStr = localStorage.getItem("currentUser");
-        if (userStr) {
-          try {
-            const user = JSON.parse(userStr);
-            axios
-              .get(`${base}/api/v1/users/${user.id}/courses`)
-              .then((res) => {
-                if (Array.isArray(res.data) && res.data.some((c: any) => c.id === courseData.id)) {
-                  setIsEnrolled(true);
-                }
-              })
-              .catch(() => {});
+  const fetchCourse = async () => {
+    try {
+      const base = API_URL.replace(/\/$/, "");
+      const userStr = localStorage.getItem("currentUser");
+      const currentUser = userStr ? JSON.parse(userStr) : null;
+      const userParam = currentUser ? `?user_id=${currentUser.id}` : "";
 
-            const progMap = user.enrolledProgress || {};
-            const saved = progMap[String(courseData.id)];
-            if (saved) {
-              if (saved.progress_percentage === 100) {
-                setIsCompleted(true);
+      const response = await axios.get<CourseDetailData>(`${base}/v1/course/${id}${userParam}`);
+      const courseData = response.data;
+      if (courseData) {
+        courseData.questions = Array.isArray(courseData.questions) ? courseData.questions : [];
+        courseData.lessons = Array.isArray(courseData.lessons) ? courseData.lessons : [];
+      }
+      setCourse(courseData);
+
+      // Инициализируем активный урок
+      const lessons = courseData.lessons;
+      if (lessons && lessons.length > 0) {
+        setActiveLessonId((prev) => {
+          if (prev && lessons.some((l) => l.id === prev)) return prev;
+          // Находим первый незавершенный или первый открытый
+          const firstIncomplete = lessons.find((l) => !l.is_completed && !l.is_locked);
+          return firstIncomplete ? firstIncomplete.id : lessons[0].id;
+        });
+      }
+
+      // Проверяем запись на курс и сохраненный прогресс
+      if (currentUser) {
+        try {
+          axios
+            .get(`${base}/v1/users/${currentUser.id}/courses`)
+            .then((res) => {
+              if (Array.isArray(res.data) && res.data.some((c: any) => c.id === courseData.id)) {
+                setIsEnrolled(true);
               }
-              if (typeof saved.currentIndex === "number" && courseData.questions.length > 0) {
-                if (
-                  saved.currentIndex >= courseData.questions.length &&
-                  typeof saved.correctAnswers === "number"
-                ) {
-                  setLastResult({
-                    correct: saved.correctAnswers,
-                    total: courseData.questions.length,
-                  });
-                } else if (saved.currentIndex < courseData.questions.length) {
-                  setActiveQuestionIndex(saved.currentIndex);
-                }
-                if (typeof saved.correctAnswers === "number") {
-                  setCorrectAnswersCount(saved.correctAnswers);
-                }
+            })
+            .catch(() => {});
+
+          const progMap = currentUser.enrolledProgress || {};
+          const saved = progMap[String(courseData.id)];
+          if (saved) {
+            if (saved.progress_percentage === 100) {
+              setIsCompleted(true);
+            }
+            if (typeof saved.currentIndex === "number" && courseData.questions.length > 0) {
+              if (
+                saved.currentIndex >= courseData.questions.length &&
+                typeof saved.correctAnswers === "number"
+              ) {
+                setLastResult({
+                  correct: saved.correctAnswers,
+                  total: courseData.questions.length,
+                });
+              } else if (saved.currentIndex < courseData.questions.length) {
+                setActiveQuestionIndex(saved.currentIndex);
+              }
+              if (typeof saved.correctAnswers === "number") {
+                setCorrectAnswersCount(saved.correctAnswers);
               }
             }
-          } catch (e) {
-            console.warn("Не удалось восстановить прогресс из localStorage", e);
           }
+        } catch (e) {
+          console.warn("Не удалось восстановить прогресс из localStorage", e);
         }
-      } catch (err) {
-        console.error(err);
-        setError("Не удалось загрузить курс. Возможно, он не существует.");
-      } finally {
-        setLoading(false);
       }
-    };
+    } catch (err) {
+      console.error(err);
+      setError("Не удалось загрузить курс. Возможно, он не существует.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     if (id) fetchCourse();
   }, [id]);
+
+  const handleCompleteLesson = async (lessonId: number) => {
+    const userStr = localStorage.getItem("currentUser");
+    if (!userStr) {
+      alert("Войдите в систему, чтобы сохранять прогресс");
+      return;
+    }
+    const user = JSON.parse(userStr);
+    try {
+      const res = await completeLesson(lessonId, user.id);
+      if (res.unlocked_next) {
+        setUnlockBanner(
+          `🎉 Поздравляем! Вся группа завершила этот модуль! Следующий модуль «${res.next_lesson?.title || ""}» теперь открыт.`
+        );
+      }
+      fetchCourse();
+    } catch (e) {
+      alert("Не удалось зафиксировать прохождение урока");
+    }
+  };
 
   // Подсчет времени чтения и структуры глав (TOC) из Markdown
   const readingStats = useMemo(() => {
@@ -391,8 +450,193 @@ function CourseDetail({ theme, toggleTheme }: CourseDetailProps) {
             </div>
 
             <div className="course-detail-container">
-              {/* --- РЕЖИМ ЧТЕНИЯ ТЕКСТА (MARKDOWN) --- */}
-              {isReadingMode && hasMarkdown ? (
+              {/* --- БАННЕР РАЗБЛОКИРОВКИ СЛЕДУЮЩЕГО МОДУЛЯ --- */}
+              {unlockBanner && (
+                <div className="celebrate-banner">
+                  {unlockBanner}
+                  <button
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#34d399",
+                      marginLeft: 12,
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                    }}
+                    onClick={() => setUnlockBanner(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* --- БАННЕР ПРИВЯЗКИ К УЧЕБНОЙ ГРУППЕ --- */}
+              {course.group_info && (
+                <div className="group-indicator-banner">
+                  <FiUsers style={{ fontSize: "1.3rem" }} />
+                  <span>
+                    Вы изучаете этот курс в составе учебной группы: <strong>{course.group_info.name}</strong>.
+                    Доступ к следующим модулям регулируется преподавателем или открывается при 100% сдаче группой.
+                  </span>
+                </div>
+              )}
+
+              {/* --- МОДУЛЬНЫЙ КУРС (STEPIK / CISCO) --- */}
+              {course.lessons && course.lessons.length > 0 ? (
+                <div className="modular-course-container">
+                  <div className="course-header-block" style={{ marginBottom: 0 }}>
+                    <div className="course-type-badge" style={{ background: "rgba(99,102,241,0.2)", color: "#818cf8" }}>
+                      🎓 Модульный курс (Stepik / Cisco NetAcad)
+                    </div>
+                    <h1 className="course-title-large" style={{ margin: "6px 0 10px 0" }}>
+                      {course.title}
+                    </h1>
+                    <p className="course-description-large" style={{ marginBottom: 12 }}>
+                      {course.description}
+                    </p>
+                  </div>
+
+                  {/* Горизонтальная панель модулей */}
+                  <div className="modular-nav">
+                    {course.lessons.map((lesson) => {
+                      const isCurrent = (activeLessonId || course.lessons![0].id) === lesson.id;
+                      return (
+                        <button
+                          key={lesson.id}
+                          type="button"
+                          className={`module-nav-item ${isCurrent ? "active" : ""} ${
+                            lesson.is_locked ? "locked" : ""
+                          } ${lesson.is_completed ? "completed" : ""}`}
+                          onClick={() => setActiveLessonId(lesson.id)}
+                        >
+                          {lesson.is_completed ? (
+                            <FiCheckCircle style={{ color: "#10b981" }} />
+                          ) : lesson.is_locked ? (
+                            <FiLock style={{ color: "#f59e0b" }} />
+                          ) : (
+                            <FiUnlock style={{ color: "#3b82f6" }} />
+                          )}
+                          <span>
+                            Модуль {lesson.order}: {lesson.title}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Контент выбранного модуля */}
+                  {(() => {
+                    const activeLesson =
+                      course.lessons.find((l) => l.id === activeLessonId) || course.lessons[0];
+                    if (!activeLesson) return null;
+
+                    if (activeLesson.is_locked) {
+                      return (
+                        <div className="module-locked-screen">
+                          <div className="locked-icon-large">🔒</div>
+                          <div className="locked-title">Модуль заблокирован преподавателем</div>
+                          <div className="locked-description">
+                            {activeLesson.lock_reason ||
+                              "Доступ к этому материалу еще не открыт для вашей группы."}
+                          </div>
+
+                          {activeLesson.group_progress_info && (
+                            <div className="group-progress-box">
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  fontSize: "0.9rem",
+                                  marginBottom: 8,
+                                }}
+                              >
+                                <span>
+                                  Предыдущий модуль:{" "}
+                                  <strong>{activeLesson.group_progress_info.prev_lesson_title}</strong>
+                                </span>
+                                <span>
+                                  Сдали: {activeLesson.group_progress_info.passed_students} из{" "}
+                                  {activeLesson.group_progress_info.total_students} студентов (
+                                  {activeLesson.group_progress_info.completion_percentage}%)
+                                </span>
+                              </div>
+                              <div className="progress-bar-container">
+                                <div
+                                  className="progress-bar-fill partial"
+                                  style={{
+                                    width: `${activeLesson.group_progress_info.completion_percentage}%`,
+                                  }}
+                                />
+                              </div>
+                              <p style={{ fontSize: "0.85rem", color: "#94a3b8", margin: "10px 0 0" }}>
+                                💡 Доступ откроется автоматически, когда все студенты вашей группы завершат
+                                предыдущий модуль, либо когда преподаватель откроет его вручную в панели
+                                управления.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="reading-main-card">
+                        <div style={{ marginBottom: 20 }}>
+                          <span
+                            style={{
+                              fontSize: "0.85rem",
+                              color: "#6366f1",
+                              fontWeight: 700,
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            Модуль {activeLesson.order}
+                          </span>
+                          <h2 style={{ margin: "4px 0 10px 0", fontSize: "1.6rem" }}>
+                            {activeLesson.title}
+                          </h2>
+                          {activeLesson.description && (
+                            <p style={{ color: "#94a3b8", margin: 0 }}>{activeLesson.description}</p>
+                          )}
+                        </div>
+
+                        {activeLesson.content && (
+                          <div
+                            className="markdown-rendered-content"
+                            dangerouslySetInnerHTML={{
+                              __html: marked.parse(activeLesson.content) as string,
+                            }}
+                          />
+                        )}
+
+                        <div
+                          style={{
+                            marginTop: 32,
+                            padding: "20px 0",
+                            borderTop: "1px solid rgba(255,255,255,0.08)",
+                            textAlign: "center",
+                          }}
+                        >
+                          {activeLesson.is_completed ? (
+                            <div style={{ color: "#10b981", fontWeight: 700, fontSize: "1.1rem" }}>
+                              <FiCheckCircle style={{ verticalAlign: "middle", marginRight: 8 }} />
+                              Вы успешно завершили этот модуль!
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="complete-course-btn"
+                              onClick={() => handleCompleteLesson(activeLesson.id)}
+                            >
+                              ✓ Завершить модуль
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : isReadingMode && hasMarkdown ? (
                 <div>
                   <div className="course-header-block" style={{ marginBottom: 20 }}>
                     <div className="course-type-badge">📖 Текстовый курс (Markdown)</div>

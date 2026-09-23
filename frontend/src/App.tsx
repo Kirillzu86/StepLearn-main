@@ -9,8 +9,7 @@ import Catalog from "./components/Catalog/Catalog";
 import CourseDetail from './components/CourseDetail/courseDetail';
 import CreateCourse from './components/CreateCourse/CreateCourse';
 import Profile from './components/Profile/Profile';
-
-
+import AdminPanel from './components/AdminPanel/AdminPanel';
 
 function App() {
   const [users, setUsers] = useState<{ id: number; name: string }[]>([]);
@@ -44,13 +43,6 @@ function App() {
   }, [theme]);
 
   return (
-    // <div>
-    //   <h1>Users:</h1>
-    //   {users.map(u => (
-    //     <div key={u.id}>{u.name}</div>
-    //   ))}
-    // </div>
-
     <Routes>
       <Route path="/" element={<HomePage theme={theme} toggleTheme={toggleTheme} />} />
       <Route path="/login" element={<LogPage theme={theme} toggleTheme={toggleTheme} />} />
@@ -59,6 +51,7 @@ function App() {
       <Route path="/create-course" element={<CreateCourse theme={theme} toggleTheme={toggleTheme} />} />
       <Route path="/course/:id" element={<CourseDetail theme={theme} toggleTheme={toggleTheme} />} />
       <Route path="/profile" element={<Profile theme={theme} toggleTheme={toggleTheme} />} />
+      <Route path="/admin-panel" element={<AdminPanel theme={theme} toggleTheme={toggleTheme} />} />
     </Routes>
   );
 }

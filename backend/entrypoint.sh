@@ -15,4 +15,7 @@ python manage.py migrate --noinput
 echo "Seeding demo data..."
 python manage.py seed_demo || true
 
+echo "Collecting static files..."
+python manage.py collectstatic --noinput || true
+
 exec "$@"

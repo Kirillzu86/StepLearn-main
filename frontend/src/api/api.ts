@@ -1,10 +1,28 @@
-// Если VITE_API_URL пустой, берем корень сайта (в dev работает Vite proxy, в prod — Nginx).
-export const API_URL = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+import axios from "axios";
 
-const getBase = () => API_URL.replace(/\/$/, '');
+// Если VITE_API_URL задан (например, при деплое в Coolify), используем его.
+// Если нет — в браузере берем текущий origin (window.location.origin).
+export const API_URL = (() => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl && typeof window !== 'undefined') {
+    const isLocalhostEnv = envUrl.includes('localhost') || envUrl.includes('127.0.0.1');
+    const isRemoteBrowser = !['localhost', '127.0.0.1'].includes(window.location.hostname);
+    if (isLocalhostEnv && isRemoteBrowser) {
+      return window.location.origin;
+    }
+    return envUrl;
+  }
+  return envUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+})();
+
+export const getBase = () => API_URL.replace(/\/$/, '');
+
+// ==========================================
+// Пользователи и курсы
+// ==========================================
 
 export async function getUsers() {
-  const res = await fetch(`${getBase()}/api/users`); 
+  const res = await fetch(`${getBase()}/users`); 
   if (!res.ok) {
     throw new Error("Failed to fetch users");
   }
@@ -13,7 +31,7 @@ export async function getUsers() {
 }
 
 export async function fetchCourses(query?: string, timestamp?: number) {
-  const urlStr = `${getBase()}/api/v1/courses`;
+  const urlStr = `${getBase()}/v1/courses`;
   
   try {
     const url = new URL(urlStr, typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8000');
@@ -32,21 +50,98 @@ export async function fetchCourses(query?: string, timestamp?: number) {
     }
 
     const data = await res.json();
-    if (Array.isArray(data)) {
-      return data;
-    }
-    if (data && Array.isArray(data.data)) {
-      return data.data;
-    }
-    if (data && Array.isArray(data.results)) {
-      return data.results;
-    }
-    if (data && Array.isArray(data.courses)) {
-      return data.courses;
-    }
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.data)) return data.data;
+    if (data && Array.isArray(data.results)) return data.results;
+    if (data && Array.isArray(data.courses)) return data.courses;
     return [];
   } catch (e) {
     console.error("Fetch courses error:", e);
     throw e;
   }
+}
+
+// ==========================================
+// Группы (StudyGroups)
+// ==========================================
+
+export async function fetchGroups(teacherId?: number) {
+  const base = getBase();
+  const url = teacherId ? `${base}/v1/groups?teacher_id=${teacherId}` : `${base}/v1/groups`;
+  const res = await axios.get(url);
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function createGroup(data: { name: string; description?: string; teacher_id: number }) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/groups`, data);
+  return res.data;
+}
+
+export async function deleteGroup(groupId: number) {
+  const base = getBase();
+  const res = await axios.delete(`${base}/v1/groups/${groupId}`);
+  return res.data;
+}
+
+export async function addStudentToGroup(groupId: number, payload: { username?: string; student_id?: number }) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/groups/${groupId}/add-student`, payload);
+  return res.data;
+}
+
+export async function removeStudentFromGroup(groupId: number, studentId: number) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/groups/${groupId}/remove-student/${studentId}`);
+  return res.data;
+}
+
+export async function joinGroupByCode(code: string, userId: number) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/groups/join`, { code, user_id: userId });
+  return res.data;
+}
+
+// ==========================================
+// Назначение курсов и Cisco/Stepik Gating
+// ==========================================
+
+export async function assignCourseToGroup(groupId: number, courseId: number) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/groups/${groupId}/assign-course`, { course_id: courseId });
+  return res.data;
+}
+
+export async function fetchGroupProgressMatrix(groupId: number, courseId: number) {
+  const base = getBase();
+  const res = await axios.get(`${base}/v1/groups/${groupId}/progress/${courseId}`);
+  return res.data;
+}
+
+export async function toggleGroupLessonAccess(
+  groupId: number,
+  lessonId: number,
+  params: { is_unlocked?: boolean; auto_unlock_when_all_pass?: boolean }
+) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/groups/${groupId}/lessons/${lessonId}/toggle-access`, params);
+  return res.data;
+}
+
+export async function completeLesson(lessonId: number, userId: number) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/lessons/${lessonId}/complete`, { user_id: userId });
+  return res.data;
+}
+
+export async function createCourseLesson(courseId: number, data: { title: string; content?: string; description?: string; order?: number }) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/courses/${courseId}/lessons`, data);
+  return res.data;
+}
+
+export async function deleteLesson(lessonId: number) {
+  const base = getBase();
+  const res = await axios.delete(`${base}/v1/lessons/${lessonId}`);
+  return res.data;
 }

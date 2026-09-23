@@ -82,6 +82,9 @@ const Header: React.FC = () => {
                 <Link to="/catalog" className={`nav-link ${isActive('/catalog') ? 'nav-link-active' : ''}`}>Каталог</Link>
                 <Link to="/" className={`nav-link ${isActive('/') ? 'nav-link-active' : ''}`}>Моё обучение</Link>
                 <Link to="/create-course" className={`nav-link ${isActive('/create-course') ? 'nav-link-active' : ''}`}>Преподавание</Link>
+                <Link to="/admin-panel" className={`nav-link ${isActive('/admin-panel') ? 'nav-link-active' : ''}`} style={{ color: '#818cf8', fontWeight: 600 }}>
+                    Учительская / Группы
+                </Link>
             </nav>
 
             {/* Поисковая строка и Аватар */}

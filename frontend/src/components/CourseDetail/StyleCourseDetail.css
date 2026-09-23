@@ -578,3 +578,121 @@ body[data-theme="dark"] .course-completion-card.completed {
     background: #16a34a;
     transform: translateY(-1px);
 }
+
+/* --- Стили для модулей и пошагового открытия (Stepik / Cisco) --- */
+.group-indicator-banner {
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 10px;
+    padding: 12px 18px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.95rem;
+    color: #818cf8;
+}
+
+body[data-theme="dark"] .group-indicator-banner {
+    color: #a5b4fc;
+}
+
+.modular-course-container {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.modular-nav {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.module-nav-item {
+    background: rgba(30, 41, 59, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #94a3b8;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.module-nav-item:hover {
+    color: #f8fafc;
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.module-nav-item.active {
+    background: #6366f1;
+    color: #ffffff;
+    border-color: #6366f1;
+}
+
+.module-nav-item.locked {
+    opacity: 0.65;
+}
+
+.module-nav-item.completed {
+    border-color: rgba(34, 197, 94, 0.5);
+}
+
+/* Экран блокировки модуля */
+.module-locked-screen {
+    background: rgba(30, 41, 59, 0.5);
+    border: 1px dashed rgba(245, 158, 11, 0.4);
+    border-radius: 16px;
+    padding: 48px 32px;
+    text-align: center;
+    max-width: 720px;
+    margin: 30px auto;
+}
+
+.locked-icon-large {
+    font-size: 3.5rem;
+    margin-bottom: 16px;
+    color: #f59e0b;
+}
+
+.locked-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: #f8fafc;
+}
+
+.locked-description {
+    font-size: 1rem;
+    color: #94a3b8;
+    line-height: 1.6;
+    margin-bottom: 24px;
+}
+
+.group-progress-box {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 18px;
+    text-align: left;
+    margin-top: 20px;
+}
+
+.celebrate-banner {
+    background: rgba(34, 197, 94, 0.15);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    color: #34d399;
+    padding: 14px 20px;
+    border-radius: 10px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    text-align: center;
+}

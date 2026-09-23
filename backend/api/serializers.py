@@ -3,21 +3,34 @@ import binascii
 
 from rest_framework import serializers
 
-from .models import Answer, Course, Enrollment, Question, User
+from .models import (
+    Answer,
+    Course,
+    Enrollment,
+    GroupCourse,
+    GroupLessonAccess,
+    Lesson,
+    Question,
+    StudentLessonProgress,
+    StudyGroup,
+    User,
+)
 
 
 class UserSerializer(serializers.ModelSerializer):
     name = serializers.CharField(read_only=True)
+    is_teacher_or_admin = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'name', 'email', 'avatar_url']
+        fields = ['id', 'username', 'name', 'email', 'avatar_url', 'role', 'is_teacher_or_admin', 'is_staff']
 
 
 class RegisterSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=6)
+    role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default='student', required=False)
 
     def validate_username(self, value):
         value = value.strip()
@@ -52,11 +65,12 @@ class LoginSerializer(serializers.Serializer):
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['username', 'email', 'avatar_url']
+        fields = ['username', 'email', 'avatar_url', 'role']
         extra_kwargs = {
             'username': {'required': False},
             'email': {'required': False},
             'avatar_url': {'required': False, 'allow_null': True},
+            'role': {'required': False},
         }
 
     def validate_username(self, value):
@@ -106,29 +120,41 @@ class QuestionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Question
-        fields = ['id', 'text', 'answers']
+        fields = ['id', 'text', 'answers', 'lesson_id']
 
 
 class QuestionInputSerializer(serializers.Serializer):
     text = serializers.CharField()
+    lesson_id = serializers.IntegerField(required=False, allow_null=True)
     answers = AnswerInputSerializer(many=True, required=False, default=list)
+
+
+class LessonSerializer(serializers.ModelSerializer):
+    course_id = serializers.IntegerField(source='course.id', read_only=True)
+    questions = QuestionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Lesson
+        fields = ['id', 'course_id', 'title', 'description', 'content', 'order', 'questions', 'created_at']
 
 
 class CourseSerializer(serializers.ModelSerializer):
     author_id = serializers.IntegerField(source='author.id', read_only=True, allow_null=True)
+    lessons_count = serializers.IntegerField(source='lessons.count', read_only=True)
 
     class Meta:
         model = Course
-        fields = ['id', 'title', 'description', 'price', 'rating', 'author_id', 'content', 'course_type', 'created_at']
+        fields = ['id', 'title', 'description', 'price', 'rating', 'author_id', 'content', 'course_type', 'lessons_count', 'created_at']
 
 
 class CourseWithQuestionsSerializer(serializers.ModelSerializer):
     questions = QuestionSerializer(many=True, read_only=True)
+    lessons = LessonSerializer(many=True, read_only=True)
     author_id = serializers.IntegerField(source='author.id', read_only=True, allow_null=True)
 
     class Meta:
         model = Course
-        fields = ['id', 'title', 'description', 'price', 'rating', 'author_id', 'content', 'course_type', 'questions']
+        fields = ['id', 'title', 'description', 'price', 'rating', 'author_id', 'content', 'course_type', 'questions', 'lessons']
 
 
 class CourseCreateSerializer(serializers.ModelSerializer):
@@ -154,7 +180,9 @@ class CourseCreateSerializer(serializers.ModelSerializer):
         course = Course.objects.create(**validated_data)
         for q_data in questions:
             answers = q_data.pop('answers', [])
-            question = Question.objects.create(course=course, **q_data)
+            lesson_id = q_data.pop('lesson_id', None)
+            lesson = Lesson.objects.filter(pk=lesson_id, course=course).first() if lesson_id else None
+            question = Question.objects.create(course=course, lesson=lesson, **q_data)
             Answer.objects.bulk_create([
                 Answer(question=question, **answer_data) for answer_data in answers
             ])
@@ -168,3 +196,42 @@ class EnrollmentProgressSerializer(serializers.Serializer):
     correctAnswers = serializers.IntegerField(required=False)
     correct_answers = serializers.IntegerField(required=False)
     completed_lessons = serializers.IntegerField(required=False)
+
+
+class GroupLessonAccessSerializer(serializers.ModelSerializer):
+    lesson_id = serializers.IntegerField(source='lesson.id', read_only=True)
+    lesson_title = serializers.CharField(source='lesson.title', read_only=True)
+    lesson_order = serializers.IntegerField(source='lesson.order', read_only=True)
+
+    class Meta:
+        model = GroupLessonAccess
+        fields = [
+            'id', 'lesson_id', 'lesson_title', 'lesson_order',
+            'is_unlocked', 'unlocked_at', 'auto_unlock_when_all_pass'
+        ]
+
+
+class StudyGroupSerializer(serializers.ModelSerializer):
+    teacher_name = serializers.CharField(source='teacher.name', read_only=True)
+    teacher_id = serializers.IntegerField(source='teacher.id', read_only=True)
+    students_count = serializers.IntegerField(source='students.count', read_only=True)
+    students = UserSerializer(many=True, read_only=True)
+    courses = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudyGroup
+        fields = [
+            'id', 'name', 'description', 'code', 'teacher_id', 'teacher_name',
+            'students_count', 'students', 'courses', 'created_at'
+        ]
+
+    def get_courses(self, obj):
+        return [
+            {
+                'id': gc.course.id,
+                'title': gc.course.title,
+                'assigned_at': gc.assigned_at,
+                'lessons_count': gc.course.lessons.count()
+            }
+            for gc in obj.group_courses.select_related('course').all()
+        ]
