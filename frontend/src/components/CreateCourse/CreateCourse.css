@@ -1,0 +1,409 @@
+/* Стили для страницы создания курса и загрузки Markdown */
+
+.create-course-container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.course-type-selector {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.08);
+  padding-bottom: 12px;
+}
+
+body[data-theme="dark"] .course-type-selector {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.type-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  color: #374151;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+body[data-theme="dark"] .type-tab-btn {
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #d1d5db;
+}
+
+.type-tab-btn:hover {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: #3b82f6;
+  color: #2563eb;
+}
+
+body[data-theme="dark"] .type-tab-btn:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: #60a5fa;
+  color: #93c5fd;
+}
+
+.type-tab-btn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+body[data-theme="dark"] .type-tab-btn.active {
+  background: #f97316;
+  border-color: #f97316;
+  color: #111827;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+}
+
+/* Зона Drag & Drop для .md */
+.md-dropzone {
+  border: 2px dashed #94a3b8;
+  border-radius: 12px;
+  padding: 30px 20px;
+  text-align: center;
+  background: rgba(241, 245, 249, 0.6);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+body[data-theme="dark"] .md-dropzone {
+  border-color: #475569;
+  background: rgba(30, 41, 59, 0.5);
+}
+
+.md-dropzone:hover,
+.md-dropzone.dragging {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
+  transform: translateY(-1px);
+}
+
+body[data-theme="dark"] .md-dropzone:hover,
+body[data-theme="dark"] .md-dropzone.dragging {
+  border-color: #f97316;
+  background: rgba(249, 115, 22, 0.1);
+}
+
+.md-dropzone-icon {
+  font-size: 2.5rem;
+  margin-bottom: 8px;
+}
+
+.md-dropzone-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+body[data-theme="dark"] .md-dropzone-title {
+  color: #f1f5f9;
+}
+
+.md-dropzone-sub {
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+body[data-theme="dark"] .md-dropzone-sub {
+  color: #94a3b8;
+}
+
+.file-info-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #dbeafe;
+  color: #1e40af;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-top: 10px;
+}
+
+body[data-theme="dark"] .file-info-badge {
+  background: rgba(59, 130, 246, 0.25);
+  color: #93c5fd;
+}
+
+/* Переключатель Редактор / Предпросмотр */
+.md-view-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.md-view-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.md-view-tab {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: transparent;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: #64748b;
+  transition: all 0.15s;
+}
+
+body[data-theme="dark"] .md-view-tab {
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+}
+
+.md-view-tab.active {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: #cbd5e1;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+body[data-theme="dark"] .md-view-tab.active {
+  background: #334155;
+  color: #f8fafc;
+  border-color: #475569;
+}
+
+/* Панель инструментов Markdown */
+.md-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px;
+  background: #f1f5f9;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  border: 1px solid #cbd5e1;
+  border-bottom: none;
+}
+
+body[data-theme="dark"] .md-toolbar {
+  background: #1e293b;
+  border-color: #475569;
+}
+
+.md-tool-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+body[data-theme="dark"] .md-tool-btn {
+  color: #cbd5e1;
+}
+
+.md-tool-btn:hover {
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+body[data-theme="dark"] .md-tool-btn:hover {
+  background: #334155;
+  border-color: #475569;
+  color: #f8fafc;
+}
+
+/* Текстовая область Markdown */
+.md-textarea {
+  width: 100%;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  padding: 14px;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 320px;
+}
+
+body[data-theme="dark"] .md-textarea {
+  background: #0f172a;
+  border-color: #475569;
+  color: #f8fafc;
+}
+
+.md-textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+body[data-theme="dark"] .md-textarea:focus {
+  border-color: #f97316;
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.2);
+}
+
+/* Панель предпросмотра */
+.md-preview-pane {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 24px;
+  min-height: 320px;
+  max-height: 600px;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+body[data-theme="dark"] .md-preview-pane {
+  background: #0f172a;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+/* Markdown рендеринг контента */
+.markdown-body {
+  line-height: 1.7;
+  font-size: 1rem;
+}
+
+.markdown-body h1 {
+  font-size: 1.85rem;
+  margin-top: 0;
+  margin-bottom: 16px;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.1);
+  padding-bottom: 8px;
+}
+
+body[data-theme="dark"] .markdown-body h1 {
+  border-bottom-color: rgba(255, 255, 255, 0.15);
+  color: #f8fafc;
+}
+
+.markdown-body h2 {
+  font-size: 1.45rem;
+  margin-top: 24px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  padding-bottom: 6px;
+}
+
+body[data-theme="dark"] .markdown-body h2 {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+  color: #f1f5f9;
+}
+
+.markdown-body h3 {
+  font-size: 1.2rem;
+  margin-top: 20px;
+  margin-bottom: 8px;
+}
+
+.markdown-body p {
+  margin-top: 0;
+  margin-bottom: 14px;
+}
+
+.markdown-body code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.9em;
+}
+
+body[data-theme="dark"] .markdown-body code {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fdba74;
+}
+
+.markdown-body pre {
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 16px 0;
+}
+
+.markdown-body pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.markdown-body blockquote {
+  margin: 16px 0;
+  padding: 10px 18px;
+  border-left: 4px solid #3b82f6;
+  background: rgba(59, 130, 246, 0.06);
+  border-radius: 0 6px 6px 0;
+  color: #334155;
+}
+
+body[data-theme="dark"] .markdown-body blockquote {
+  border-left-color: #f97316;
+  background: rgba(249, 115, 22, 0.1);
+  color: #cbd5e1;
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #cbd5e1;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+body[data-theme="dark"] .markdown-body th,
+body[data-theme="dark"] .markdown-body td {
+  border-color: #475569;
+}
+
+.markdown-body th {
+  background: #f1f5f9;
+  font-weight: 600;
+}
+
+body[data-theme="dark"] .markdown-body th {
+  background: #1e293b;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 24px;
+  margin-bottom: 16px;
+}
+
+.markdown-body li {
+  margin-bottom: 4px;
+}
