@@ -1,11 +1,10 @@
 {
-  "name": "steplearn",
+  "name": "steplearn-teacher",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:teacher": "npm --prefix ./frontend-teacher run dev",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

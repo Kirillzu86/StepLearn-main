@@ -1,3 +1,4 @@
+// AI-GENERATED: Antigravity
 import axios from "axios";
 
 // Если VITE_API_URL задан (например, при деплое в Coolify), используем его.
@@ -22,7 +23,7 @@ export const getBase = () => API_URL.replace(/\/$/, '');
 // ==========================================
 
 export async function getUsers() {
-  const res = await fetch(`${getBase()}/users`); 
+  const res = await fetch(`${getBase()}/users`);
   if (!res.ok) {
     throw new Error("Failed to fetch users");
   }
@@ -32,7 +33,6 @@ export async function getUsers() {
 
 export async function fetchCourses(query?: string, timestamp?: number) {
   const urlStr = `${getBase()}/v1/courses`;
-  
   try {
     const url = new URL(urlStr, typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8000');
     if (timestamp) url.searchParams.set('_t', String(timestamp));
@@ -40,10 +40,10 @@ export async function fetchCourses(query?: string, timestamp?: number) {
 
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), 8000);
-    
+
     const res = await fetch(url.toString(), { signal: controller.signal });
     clearTimeout(id);
-    
+
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       throw new Error(`Error: ${res.status} ${body}`);
@@ -59,6 +59,13 @@ export async function fetchCourses(query?: string, timestamp?: number) {
     console.error("Fetch courses error:", e);
     throw e;
   }
+}
+
+export async function fetchCourseDetail(courseId: number, userId?: number) {
+  const base = getBase();
+  const userParam = userId ? `?user_id=${userId}` : "";
+  const res = await axios.get(`${base}/v1/course/${courseId}${userParam}`);
+  return res.data;
 }
 
 // ==========================================
@@ -134,7 +141,15 @@ export async function completeLesson(lessonId: number, userId: number) {
   return res.data;
 }
 
-export async function createCourseLesson(courseId: number, data: { title: string; content?: string; description?: string; order?: number }) {
+export async function createCourseLesson(courseId: number, data: {
+  title: string;
+  content?: string;
+  description?: string;
+  order?: number;
+  block_id?: number;
+  lesson_type?: string;
+  is_mandatory?: boolean;
+}) {
   const base = getBase();
   const res = await axios.post(`${base}/v1/courses/${courseId}/lessons`, data);
   return res.data;
@@ -143,5 +158,112 @@ export async function createCourseLesson(courseId: number, data: { title: string
 export async function deleteLesson(lessonId: number) {
   const base = getBase();
   const res = await axios.delete(`${base}/v1/lessons/${lessonId}`);
+  return res.data;
+}
+
+// ==========================================
+// Блоки курса и импорт Markdown
+// ==========================================
+
+export async function fetchCourseBlocks(courseId: number) {
+  const base = getBase();
+  const res = await axios.get(`${base}/v1/courses/${courseId}/blocks`);
+  return res.data;
+}
+
+export async function createCourseBlock(courseId: number, data: { title: string; description?: string; order?: number }) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/courses/${courseId}/blocks`, data);
+  return res.data;
+}
+
+export async function importCourseMarkdown(courseId: number, data: { title?: string; content: string; block_id?: number }) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/courses/${courseId}/import-markdown`, data);
+  return res.data;
+}
+
+// ==========================================
+// Экзамены
+// ==========================================
+
+export async function fetchBlockExam(blockId: number, userId?: number) {
+  const base = getBase();
+  const param = userId ? `?user_id=${userId}` : "";
+  const res = await axios.get(`${base}/v1/blocks/${blockId}/exam${param}`);
+  return res.data;
+}
+
+export async function createOrUpdateBlockExam(blockId: number, data: {
+  title: string;
+  description?: string;
+  passing_score?: number;
+  max_attempts?: number;
+  questions?: Array<{ text: string; answers: Array<{ text: string; is_correct: boolean }> }>;
+}) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/blocks/${blockId}/exam`, data);
+  return res.data;
+}
+
+export async function fetchExam(examId: number, userId?: number) {
+  const base = getBase();
+  const param = userId ? `?user_id=${userId}` : "";
+  const res = await axios.get(`${base}/v1/exams/${examId}${param}`);
+  return res.data;
+}
+
+export async function submitExam(examId: number, payload: {
+  user_id: number;
+  answers: Array<{ question_id: number; answer_id: number }>;
+}) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/exams/${examId}/submit`, payload);
+  return res.data;
+}
+
+// ==========================================
+// Кабинет преподавателя (Teacher Dashboard & Students)
+// ==========================================
+
+export async function fetchTeacherDashboard() {
+  const base = getBase();
+  const res = await axios.get(`${base}/v1/teacher/dashboard`);
+  return res.data;
+}
+
+export async function fetchTeacherStudents(params?: { q?: string; group_id?: number }) {
+  const base = getBase();
+  const res = await axios.get(`${base}/v1/teacher/students`, { params });
+  return res.data;
+}
+
+export async function quickCreateStudent(payload: { first_name: string; last_name: string; group_id?: number }) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/teacher/students/quick-create`, payload);
+  return res.data;
+}
+
+export async function fetchTeacherStudentDetail(studentId: number) {
+  const base = getBase();
+  const res = await axios.get(`${base}/v1/teacher/students/${studentId}`);
+  return res.data;
+}
+
+export async function resetStudentPassword(studentId: number) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/teacher/students/${studentId}/reset-password`);
+  return res.data;
+}
+
+export async function resetStudentProgress(studentId: number, courseId?: number) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/teacher/students/${studentId}/reset-progress`, { course_id: courseId });
+  return res.data;
+}
+
+export async function toggleStudentStatus(studentId: number) {
+  const base = getBase();
+  const res = await axios.post(`${base}/v1/teacher/students/${studentId}/toggle-status`);
   return res.data;
 }

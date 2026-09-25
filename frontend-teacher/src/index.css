@@ -13,7 +13,6 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Dark theme overrides */
 [data-theme='dark'] {
   --bg-color: #121212;
   --text-color: #e0e0e0;
@@ -43,7 +42,3 @@ h1 {
   font-size: 3.2em;
   line-height: 1.1;
 }
-/* 
-  Удалены стандартные стили Vite для цвета, фона и кнопок.
-  Это предотвращает конфликты и делает управление темами более предсказуемым.
-*/

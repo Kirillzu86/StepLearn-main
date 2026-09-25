@@ -152,6 +152,7 @@ function LogPage({ theme, toggleTheme }: LogPageProps) {
                     {renderInputField('Почта или имя пользователя', 'text', 'login', Icons.Mail)}
                     {renderInputField('Пароль', 'password', 'password', Icons.Lock, true, isPasswordVisible, () => setIsPasswordVisible(!isPasswordVisible))}
                     <button type="submit" className="submit-btn" style={{ backgroundColor: isDarkTheme ? 'white' : '#111827', color: isDarkTheme ? '#111827' : 'white' }}>Войти</button>
+                    <button type="button" className="cancel-btn" style={{ marginLeft: '0.5rem', backgroundColor: isDarkTheme ? '#e5e7eb' : '#374151', color: isDarkTheme ? '#111827' : 'white' }} onClick={() => navigate('/')}>Отмена</button>
                 </form>
             </div>
         </div>

@@ -1,5 +1,6 @@
 import { useState, type ChangeEvent, type FormEvent, type SVGProps, type FC } from "react";
 import "./StyleRegPage.css";
+import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
@@ -49,10 +50,10 @@ interface RegPageProps {
     toggleTheme: () => void;
 }
 
-import { API_URL } from "../../api/api";
+import { useNavigate } from "react-router-dom";
 
 function RegPage({ theme, toggleTheme }: RegPageProps) {
-    const [formData, setFormData] = useState({ username: '', email: '', password: '', confirmPassword: '' });
+    const navigate = useNavigate();
     const [message, setMessage] = useState({ text: '', type: '' });
     const [errors, setErrors] = useState({ username: false, email: false, password: false, confirmPassword: false });
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
@@ -105,6 +106,7 @@ function RegPage({ theme, toggleTheme }: RegPageProps) {
             // сохраняем текущего пользователя в localStorage
             window.localStorage.setItem("currentUser", JSON.stringify(user));
             setMessage({ text: `Аккаунт успешно создан для ${user.username}!`, type: 'success' });
+            navigate('/');
         } catch (err: any) {
             setMessage({ text: err.message || 'Ошибка при регистрации', type: 'error' });
         }
@@ -146,7 +148,7 @@ function RegPage({ theme, toggleTheme }: RegPageProps) {
             backgroundImage: isDarkTheme ? 'radial-gradient(circle at 50% 0%, #3b82f640, #030712 35%)' : 'radial-gradient(circle at 50% 0%, #e2e8f040, #f8fafc 35%)',
             animation: 'pulse-spotlight 15s infinite ease-in-out'
         }}>
-            <button onClick={toggleTheme} style={{ position: 'absolute', top: '2rem', width: '40px', height: '40px', borderRadius: '50%', border: 'none', cursor: 'pointer', background: isDarkTheme ? '#eee' : '#111827' }} />
+                        <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
 
             <div className="form-card" style={{ 
                 backgroundColor: isDarkTheme ? '#111827' : '#ffffff', 
@@ -169,6 +171,7 @@ function RegPage({ theme, toggleTheme }: RegPageProps) {
                     {renderInputField('Пароль', 'password', 'password', Icons.Lock, true, isPasswordVisible, () => setIsPasswordVisible(!isPasswordVisible))}
                     {renderInputField('Повтор пароля', 'password', 'confirmPassword', Icons.Lock, true, isConfirmPasswordVisible, () => setIsConfirmPasswordVisible(!isConfirmPasswordVisible))}
                     <button type="submit" className="submit-btn" style={{ backgroundColor: isDarkTheme ? 'white' : '#111827', color: isDarkTheme ? '#111827' : 'white' }}>Зарегистрироваться</button>
+                    <button type="button" className="cancel-btn" style={{ marginLeft: '0.5rem', backgroundColor: isDarkTheme ? '#e5e7eb' : '#374151', color: isDarkTheme ? '#111827' : 'white' }} onClick={() => navigate('/')}>Отмена</button>
                 </form>
             </div>
         </div>
