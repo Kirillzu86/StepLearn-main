@@ -1,3 +1,4 @@
+# AI-GENERATED: Antigravity
 import uuid
 from django.contrib.auth.models import AbstractUser
 from django.db import models
@@ -12,6 +13,7 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     avatar_url = models.TextField(blank=True, null=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='student')
+    last_activity = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['id']
@@ -25,14 +27,28 @@ class User(AbstractUser):
         return self.role in ['teacher', 'admin'] or self.is_staff or self.is_superuser
 
     def __str__(self):
-        return self.username
+        return f'{self.username} ({self.get_role_display()})'
 
 
 class Course(models.Model):
+    STATUS_CHOICES = [
+        ('draft', 'Черновик'),
+        ('published', 'Опубликован'),
+        ('archived', 'Архив'),
+    ]
+    LEVEL_CHOICES = [
+        ('beginner', 'Начинающий'),
+        ('intermediate', 'Средний'),
+        ('advanced', 'Продвинутый'),
+    ]
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     price = models.PositiveIntegerField(default=0)
-    rating = models.FloatField(default=4.5)
+    rating = models.FloatField(default=4.8)
+    category = models.CharField(max_length=100, default='Программирование')
+    level = models.CharField(max_length=20, choices=LEVEL_CHOICES, default='beginner')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='published')
+    cover_image = models.TextField(blank=True, null=True)
     author = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -47,7 +63,7 @@ class Course(models.Model):
         blank=True,
     )
     content = models.TextField(blank=True, null=True)
-    course_type = models.CharField(max_length=20, default='quiz')
+    course_type = models.CharField(max_length=20, default='programming')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -56,12 +72,52 @@ class Course(models.Model):
     def __str__(self):
         return self.title
 
+    @property
+    def lessons_count(self):
+        return self.lessons.count()
 
-class Lesson(models.Model):
-    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='lessons')
+    @property
+    def blocks_count(self):
+        return self.blocks.count()
+
+
+class CourseBlock(models.Model):
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='blocks')
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
-    content = models.TextField(blank=True, default='')
+    order = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['order', 'id']
+        constraints = [
+            models.UniqueConstraint(fields=['course', 'order'], name='unique_course_block_order'),
+        ]
+
+    def __str__(self):
+        return f'{self.course.title} - Блок #{self.order}: {self.title}'
+
+
+class Lesson(models.Model):
+    LESSON_TYPE_CHOICES = [
+        ('theory', 'Теория'),
+        ('practice', 'Практика'),
+        ('test', 'Тест'),
+        ('homework', 'Домашнее задание'),
+    ]
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='lessons')
+    block = models.ForeignKey(
+        CourseBlock,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='lessons',
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    content = models.TextField(blank=True, default='', help_text='Текст урока в формате Markdown')
+    lesson_type = models.CharField(max_length=20, choices=LESSON_TYPE_CHOICES, default='theory')
+    is_mandatory = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -75,9 +131,32 @@ class Lesson(models.Model):
         return f'{self.course.title} - #{self.order} {self.title}'
 
 
+class Exam(models.Model):
+    block = models.OneToOneField(
+        CourseBlock,
+        on_delete=models.CASCADE,
+        related_name='exam',
+        null=True,
+        blank=True,
+    )
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='exams')
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    passing_score = models.PositiveIntegerField(default=70, help_text='Минимальный процент для сдачи')
+    max_attempts = models.PositiveIntegerField(default=3, help_text='Максимум попыток сдачи')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return f'Экзамен: {self.title} ({self.course.title})'
+
+
 class Question(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='questions')
     lesson = models.ForeignKey(Lesson, on_delete=models.SET_NULL, null=True, blank=True, related_name='questions')
+    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, null=True, blank=True, related_name='questions')
     text = models.TextField()
 
     class Meta:
@@ -97,6 +176,22 @@ class Answer(models.Model):
 
     def __str__(self):
         return self.text[:80]
+
+
+class ExamAttempt(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='exam_attempts')
+    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='attempts')
+    score = models.PositiveIntegerField(default=0)  # процент 0-100
+    passed = models.BooleanField(default=False)
+    answers_data = models.JSONField(default=dict, blank=True)
+    completed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-completed_at']
+
+    def __str__(self):
+        status = 'Сдан' if self.passed else 'Не сдан'
+        return f'{self.user.username} -> {self.exam.title}: {self.score}% ({status})'
 
 
 class Enrollment(models.Model):

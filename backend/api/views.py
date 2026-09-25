@@ -1,4 +1,10 @@
+# AI-GENERATED: Antigravity
+import datetime
+import random
+import re
+import string
 import uuid
+
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -9,7 +15,10 @@ from rest_framework.response import Response
 from .models import (
     Answer,
     Course,
+    CourseBlock,
     Enrollment,
+    Exam,
+    ExamAttempt,
     GroupCourse,
     GroupLessonAccess,
     Lesson,
@@ -19,12 +28,17 @@ from .models import (
     User,
 )
 from .serializers import (
+    CourseBlockSerializer,
     CourseCreateSerializer,
     CourseSerializer,
-    CourseWithQuestionsSerializer,
+    CourseWithDetailsSerializer,
+    ExamAttemptSerializer,
+    ExamDetailSerializer,
+    ExamSerializer,
     GroupLessonAccessSerializer,
     LessonSerializer,
     LoginSerializer,
+    QuickCreateStudentSerializer,
     RegisterSerializer,
     StudyGroupSerializer,
     UserSerializer,
@@ -47,7 +61,6 @@ def course_list_item(course, enrollment=None, *, enrolled=False):
             if total_questions > 0:
                 total_lessons = total_questions
             elif course.content:
-                import re
                 sections = len(re.findall(r'^#{1,3}\s+', course.content, re.MULTILINE))
                 total_lessons = max(1, sections)
             else:
@@ -68,13 +81,18 @@ def course_list_item(course, enrollment=None, *, enrolled=False):
         'id': course.id,
         'title': course.title,
         'description': course.description or '',
+        'category': course.category,
+        'level': course.level,
+        'status': course.status,
+        'cover_image': course.cover_image,
         'price': course.price,
-        'rating': getattr(course, 'rating', 4.5) or 4.5,
-        'course_type': getattr(course, 'course_type', 'quiz'),
+        'rating': getattr(course, 'rating', 4.8) or 4.8,
+        'course_type': getattr(course, 'course_type', 'programming'),
         'has_content': bool(course.content),
         'students_count': students_count,
         'price_status': price_status,
         'total_lessons': total_lessons,
+        'blocks_count': course.blocks.count(),
         'completed_lessons': completed_lessons,
         'progress_percentage': progress_percentage,
     }
@@ -105,7 +123,10 @@ def register(request):
 def login(request):
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    return Response(UserSerializer(serializer.validated_data['user']).data)
+    user = serializer.validated_data['user']
+    user.last_activity = timezone.now()
+    user.save(update_fields=['last_activity'])
+    return Response(UserSerializer(user).data)
 
 
 @api_view(['GET', 'PUT', 'PATCH'])
@@ -125,7 +146,7 @@ def user_detail(request, user_id):
 
 
 # ==========================================
-# 2. КУРСЫ И УРОКИ
+# 2. КУРСЫ, БЛОКИ, УРОКИ И ИМПОРТ MARKDOWN
 # ==========================================
 
 @api_view(['GET', 'POST'])
@@ -137,6 +158,9 @@ def course_list(request):
         return Response(CourseSerializer(course).data, status=status.HTTP_200_OK)
 
     query = (request.query_params.get('q') or '').strip()
+    category = request.query_params.get('category')
+    level = request.query_params.get('level')
+
     qs = Course.objects.annotate(
         students_count=Count('enrollments', distinct=True),
         total_lessons=Count('lessons', distinct=True),
@@ -144,6 +168,10 @@ def course_list(request):
 
     if query:
         qs = qs.filter(Q(title__icontains=query) | Q(description__icontains=query))
+    if category:
+        qs = qs.filter(category=category)
+    if level:
+        qs = qs.filter(level=level)
 
     return Response([course_list_item(course, enrolled=False) for course in qs])
 
@@ -151,7 +179,7 @@ def course_list(request):
 @api_view(['GET'])
 def course_detail(request, course_id):
     try:
-        course = Course.objects.prefetch_related('questions__answers', 'lessons__questions__answers').get(pk=course_id)
+        course = Course.objects.prefetch_related('blocks__lessons', 'blocks__exam', 'lessons__questions__answers').get(pk=course_id)
     except Course.DoesNotExist:
         return Response({'detail': 'Курс не найден'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -163,69 +191,73 @@ def course_detail(request, course_id):
         except (User.DoesNotExist, ValueError):
             pass
 
-    data = CourseWithQuestionsSerializer(course).data
+    data = CourseSerializer(course).data
 
-    # Находим группу пользователя для этого курса
-    user_group = None
-    if current_user:
-        user_group = StudyGroup.objects.filter(
-            students=current_user,
-            group_courses__course=course,
-        ).first()
-
-    # Формируем список уроков со статусом блокировки (Stepik / Cisco gating)
-    lessons_data = []
+    # Формируем уроки с последовательной проверкой блокировки (Stepik sequential gating)
     lessons = list(course.lessons.all().order_by('order', 'id'))
+    completed_ids = set()
+    if current_user:
+        completed_ids = set(
+            StudentLessonProgress.objects.filter(
+                user=current_user,
+                lesson__in=lessons,
+                is_completed=True
+            ).values_list('lesson_id', flat=True)
+        )
 
+    lessons_data = []
     for idx, lesson in enumerate(lessons):
         lesson_dict = LessonSerializer(lesson).data
-        is_locked = False
-        lock_reason = None
-        group_progress_info = None
+        is_completed = lesson.id in completed_ids
+        lesson_dict['is_completed'] = is_completed
 
-        if user_group:
-            access = GroupLessonAccess.objects.filter(group=user_group, lesson=lesson).first()
-            if access:
-                is_locked = not access.is_unlocked
-                if is_locked:
-                    lock_reason = 'Преподаватель еще не открыл доступ к этому модулю для вашей группы.'
-                    # Проверяем прогресс по предыдущему модулю
-                    if idx > 0:
-                        prev_lesson = lessons[idx - 1]
-                        total_group_students = user_group.students.count()
-                        passed_count = StudentLessonProgress.objects.filter(
-                            user__in=user_group.students.all(),
-                            lesson=prev_lesson,
-                            is_completed=True,
-                        ).count()
-                        group_progress_info = {
-                            'prev_lesson_title': prev_lesson.title,
-                            'passed_students': passed_count,
-                            'total_students': total_group_students,
-                            'completion_percentage': round((passed_count / max(1, total_group_students)) * 100),
-                        }
-            elif idx > 0:
-                is_locked = True
-                lock_reason = 'Модуль ожидает открытия преподавателем.'
-
-            # Прогресс текущего студента по этому уроку
-            user_prog = StudentLessonProgress.objects.filter(user=current_user, lesson=lesson).first()
-            lesson_dict['is_completed'] = user_prog.is_completed if user_prog else False
+        # Первый урок всегда открыт
+        if idx == 0:
+            is_locked = False
+            lock_reason = None
         else:
-            # Для независимых студентов — все уроки доступны
-            if current_user:
-                user_prog = StudentLessonProgress.objects.filter(user=current_user, lesson=lesson).first()
-                lesson_dict['is_completed'] = user_prog.is_completed if user_prog else False
-            else:
-                lesson_dict['is_completed'] = False
+            # Следующий урок открыт только если предыдущий завершен
+            prev_lesson = lessons[idx - 1]
+            prev_completed = prev_lesson.id in completed_ids
+            is_locked = not prev_completed
+            lock_reason = f'🔒 Завершите урок "{prev_lesson.title}", чтобы открыть этот материал.' if is_locked else None
 
         lesson_dict['is_locked'] = is_locked
         lesson_dict['lock_reason'] = lock_reason
-        lesson_dict['group_progress_info'] = group_progress_info
         lessons_data.append(lesson_dict)
 
     data['lessons'] = lessons_data
-    data['group_info'] = {'id': user_group.id, 'name': user_group.name} if user_group else None
+
+    # Блоки с экзаменами
+    blocks_data = []
+    for block in course.blocks.all().order_by('order', 'id'):
+        b_dict = CourseBlockSerializer(block).data
+        b_lessons = [l for l in lessons_data if l.get('block_id') == block.id]
+        b_dict['lessons'] = b_lessons
+
+        # Проверка блокировки экзамена
+        exam = getattr(block, 'exam', None)
+        if exam:
+            exam_dict = ExamSerializer(exam).data
+            # Экзамен открыт только когда все обязательные уроки блока завершены
+            mandatory_ids = [l['id'] for l in b_lessons if l.get('is_mandatory', True)]
+            all_done = all(lid in completed_ids for lid in mandatory_ids)
+            exam_dict['is_locked'] = not all_done
+            exam_dict['lock_reason'] = '🔒 Экзамен закрыт. Сначала завершите все уроки этого блока.' if not all_done else None
+            
+            # Результаты попыток студента
+            if current_user:
+                attempts = ExamAttempt.objects.filter(user=current_user, exam=exam).order_by('-completed_at')
+                exam_dict['attempts_count'] = attempts.count()
+                exam_dict['best_score'] = max([a.score for a in attempts], default=None)
+                exam_dict['passed'] = any(a.passed for a in attempts)
+            b_dict['exam'] = exam_dict
+        else:
+            b_dict['exam'] = None
+
+        blocks_data.append(b_dict)
+
+    data['blocks'] = blocks_data
     return Response(data)
 
 
@@ -235,6 +267,29 @@ def course_create(request):
     serializer.is_valid(raise_exception=True)
     course = serializer.save()
     return Response(CourseSerializer(course).data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET', 'POST'])
+def course_blocks(request, course_id):
+    try:
+        course = Course.objects.get(pk=course_id)
+    except Course.DoesNotExist:
+        return Response({'detail': 'Курс не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'POST':
+        title = request.data.get('title', '').strip()
+        if not title:
+            return Response({'detail': 'Название блока обязательно'}, status=status.HTTP_400_BAD_REQUEST)
+        description = request.data.get('description', '')
+        order = request.data.get('order')
+        if order is None:
+            last = course.blocks.order_by('-order').first()
+            order = (last.order + 1) if last else 1
+        block = CourseBlock.objects.create(course=course, title=title, description=description, order=int(order))
+        return Response(CourseBlockSerializer(block).data, status=status.HTTP_201_CREATED)
+
+    blocks = course.blocks.prefetch_related('lessons', 'exam').all().order_by('order')
+    return Response(CourseBlockSerializer(blocks, many=True).data)
 
 
 @api_view(['POST'])
@@ -250,6 +305,9 @@ def course_lessons_create(request, course_id):
 
     description = request.data.get('description', '')
     content = request.data.get('content', '')
+    block_id = request.data.get('block_id')
+    lesson_type = request.data.get('lesson_type', 'theory')
+    is_mandatory = bool(request.data.get('is_mandatory', True))
     order = request.data.get('order')
 
     if order is None:
@@ -258,23 +316,66 @@ def course_lessons_create(request, course_id):
     else:
         order = int(order)
 
+    block = CourseBlock.objects.filter(pk=block_id, course=course).first() if block_id else None
+
     lesson = Lesson.objects.create(
         course=course,
+        block=block,
         title=title,
         description=description,
         content=content,
+        lesson_type=lesson_type,
+        is_mandatory=is_mandatory,
         order=order,
     )
 
-    # Если курс уже назначен группам, создаем записи доступа
-    for gc in course.group_courses.all():
-        is_first = (order == 1)
-        GroupLessonAccess.objects.get_or_create(
-            group=gc.group,
-            lesson=lesson,
-            defaults={'is_unlocked': is_first, 'auto_unlock_when_all_pass': True},
-        )
+    return Response(LessonSerializer(lesson).data, status=status.HTTP_201_CREATED)
 
+
+@api_view(['POST'])
+def course_import_markdown(request, course_id):
+    """
+    Создание урока из Markdown-текста или загруженного .md файла (Раздел 28 плана).
+    Автоматически извлекает первый заголовок # в качестве названия, если не указано явно.
+    """
+    try:
+        course = Course.objects.get(pk=course_id)
+    except Course.DoesNotExist:
+        return Response({'detail': 'Курс не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+    content = request.data.get('content') or ''
+    title = request.data.get('title', '').strip()
+    block_id = request.data.get('block_id')
+
+    if 'file' in request.FILES:
+        uploaded_file = request.FILES['file']
+        content = uploaded_file.read().decode('utf-8', errors='ignore')
+        if not title:
+            title = uploaded_file.name.replace('.md', '').replace('_', ' ')
+
+    if not content:
+        return Response({'detail': 'Содержимое Markdown не может быть пустым'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not title:
+        match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+        if match:
+            title = match.group(1).strip()
+        else:
+            title = 'Новый урок'
+
+    block = CourseBlock.objects.filter(pk=block_id, course=course).first() if block_id else None
+    last_lesson = course.lessons.order_by('-order').first()
+    order = (last_lesson.order + 1) if last_lesson else 1
+
+    lesson = Lesson.objects.create(
+        course=course,
+        block=block,
+        title=title,
+        content=content,
+        order=order,
+        lesson_type='theory',
+        is_mandatory=True,
+    )
     return Response(LessonSerializer(lesson).data, status=status.HTTP_201_CREATED)
 
 
@@ -298,13 +399,22 @@ def lesson_detail(request, lesson_id):
         lesson.content = request.data['content']
     if 'order' in request.data:
         lesson.order = int(request.data['order'])
-    lesson.save()
+    if 'lesson_type' in request.data:
+        lesson.lesson_type = request.data['lesson_type']
+    if 'block_id' in request.data:
+        b_id = request.data['block_id']
+        lesson.block = CourseBlock.objects.filter(pk=b_id, course=lesson.course).first() if b_id else None
 
+    lesson.save()
     return Response(LessonSerializer(lesson).data)
 
 
 @api_view(['POST'])
 def complete_lesson(request, lesson_id):
+    """
+    Завершение урока студентом (Разделы 10-12 плана).
+    Открывает следующий урок и пересчитывает общий прогресс курса.
+    """
     try:
         lesson = Lesson.objects.select_related('course').get(pk=lesson_id)
     except Lesson.DoesNotExist:
@@ -319,13 +429,16 @@ def complete_lesson(request, lesson_id):
     except User.DoesNotExist:
         return Response({'detail': 'Пользователь не найден'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Фиксируем завершение урока студентом
     progress, _ = StudentLessonProgress.objects.get_or_create(user=user, lesson=lesson)
     progress.is_completed = True
     progress.completed_at = timezone.now()
     progress.save()
 
-    # Обновляем общий прогресс курса в Enrollment
+    # Обновляем активность
+    user.last_activity = timezone.now()
+    user.save(update_fields=['last_activity'])
+
+    # Обновляем общий прогресс курса
     enrollment, _ = Enrollment.objects.get_or_create(user=user, course=lesson.course)
     total_lessons = lesson.course.lessons.count() or 1
     completed_count = StudentLessonProgress.objects.filter(
@@ -338,61 +451,412 @@ def complete_lesson(request, lesson_id):
     enrollment.progress_percentage = min(100, int((completed_count / total_lessons) * 100))
     enrollment.save()
 
-    # Авто-открытие следующего урока для группы (логика Stepik / Cisco)
-    unlocked_next = False
-    next_lesson_info = None
-
-    # Проверяем все группы, в которых состоит студент и к которым привязан курс
-    user_groups = StudyGroup.objects.filter(students=user, group_courses__course=lesson.course)
-    for group in user_groups:
-        total_students = group.students.count()
-        if total_students == 0:
-            continue
-
-        # Сколько студентов в группе завершили этот урок?
-        group_completed_count = StudentLessonProgress.objects.filter(
-            user__in=group.students.all(),
-            lesson=lesson,
-            is_completed=True,
-        ).count()
-
-        # Если 100% группы сдали материал
-        if group_completed_count >= total_students:
-            # Ищем следующий урок
-            next_lesson = Lesson.objects.filter(
-                course=lesson.course,
-                order__gt=lesson.order,
-            ).order_by('order').first()
-
-            if next_lesson:
-                next_access, _ = GroupLessonAccess.objects.get_or_create(
-                    group=group,
-                    lesson=next_lesson,
-                    defaults={'is_unlocked': False, 'auto_unlock_when_all_pass': True},
-                )
-                if next_access.auto_unlock_when_all_pass and not next_access.is_unlocked:
-                    next_access.is_unlocked = True
-                    next_access.unlocked_at = timezone.now()
-                    next_access.save()
-                    unlocked_next = True
-                    next_lesson_info = {
-                        'id': next_lesson.id,
-                        'title': next_lesson.title,
-                        'group_name': group.name,
-                    }
+    # Следующий урок
+    next_lesson = Lesson.objects.filter(course=lesson.course, order__gt=lesson.order).order_by('order').first()
 
     return Response({
         'status': 'ok',
         'is_completed': True,
-        'unlocked_next': unlocked_next,
-        'next_lesson': next_lesson_info,
+        'unlocked_next': next_lesson is not None,
+        'next_lesson': {
+            'id': next_lesson.id,
+            'title': next_lesson.title,
+            'order': next_lesson.order,
+        } if next_lesson else None,
         'completed_lessons': enrollment.completed_lessons,
+        'total_lessons': total_lessons,
         'progress_percentage': enrollment.progress_percentage,
     })
 
 
 # ==========================================
-# 3. СИСТЕМА ГРУПП (STUDY GROUPS & CISCO/STEPIK GATING)
+# 3. ЭКЗАМЕНЫ И ТЕСТИРОВАНИЕ
+# ==========================================
+
+@api_view(['GET', 'POST'])
+def block_exam(request, block_id):
+    try:
+        block = CourseBlock.objects.select_related('course').get(pk=block_id)
+    except CourseBlock.DoesNotExist:
+        return Response({'detail': 'Блок не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+    exam = getattr(block, 'exam', None)
+
+    if request.method == 'POST':
+        title = request.data.get('title', '').strip() or f'Экзамен: {block.title}'
+        description = request.data.get('description', '')
+        passing_score = int(request.data.get('passing_score', 70))
+        max_attempts = int(request.data.get('max_attempts', 3))
+        questions_data = request.data.get('questions', [])
+
+        if exam:
+            exam.title = title
+            exam.description = description
+            exam.passing_score = passing_score
+            exam.max_attempts = max_attempts
+            exam.save()
+        else:
+            exam = Exam.objects.create(
+                block=block,
+                course=block.course,
+                title=title,
+                description=description,
+                passing_score=passing_score,
+                max_attempts=max_attempts,
+            )
+
+        if questions_data:
+            exam.questions.all().delete()
+            for q_item in questions_data:
+                q_text = q_item.get('text', '').strip()
+                if not q_text:
+                    continue
+                q = Question.objects.create(course=block.course, exam=exam, text=q_text)
+                for a_item in q_item.get('answers', []):
+                    Answer.objects.create(
+                        question=q,
+                        text=a_item.get('text', ''),
+                        is_correct=bool(a_item.get('is_correct', False))
+                    )
+
+        return Response(ExamDetailSerializer(exam, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+    if not exam:
+        return Response({'detail': 'В данном блоке нет экзамена'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Проверка условий блокировки экзамена для студента (Раздел 14 плана)
+    user_id = request.query_params.get('user_id')
+    is_locked = False
+    lock_reason = None
+    if user_id:
+        user = User.objects.filter(pk=user_id).first()
+        if user and user.role == 'student':
+            block_mandatory_lessons = block.lessons.filter(is_mandatory=True)
+            completed_count = StudentLessonProgress.objects.filter(
+                user=user,
+                lesson__in=block_mandatory_lessons,
+                is_completed=True
+            ).count()
+            if completed_count < block_mandatory_lessons.count():
+                is_locked = True
+                lock_reason = '🔒 Экзамен закрыт. Сначала завершите все обязательные уроки этого блока.'
+
+    data = ExamDetailSerializer(exam, context={'request': request}).data
+    data['is_locked'] = is_locked
+    data['lock_reason'] = lock_reason
+    return Response(data)
+
+
+@api_view(['GET'])
+def exam_detail(request, exam_id):
+    try:
+        exam = Exam.objects.prefetch_related('questions__answers').get(pk=exam_id)
+    except Exam.DoesNotExist:
+        return Response({'detail': 'Экзамен не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+    user_id = request.query_params.get('user_id')
+    is_locked = False
+    lock_reason = None
+    if user_id and exam.block:
+        user = User.objects.filter(pk=user_id).first()
+        if user and user.role == 'student':
+            block_mandatory_lessons = exam.block.lessons.filter(is_mandatory=True)
+            completed_count = StudentLessonProgress.objects.filter(
+                user=user,
+                lesson__in=block_mandatory_lessons,
+                is_completed=True
+            ).count()
+            if completed_count < block_mandatory_lessons.count():
+                is_locked = True
+                lock_reason = '🔒 Экзамен закрыт. Сначала завершите все обязательные уроки этого блока.'
+
+    data = ExamDetailSerializer(exam, context={'request': request}).data
+    data['is_locked'] = is_locked
+    data['lock_reason'] = lock_reason
+    return Response(data)
+
+
+@api_view(['POST'])
+def exam_submit(request, exam_id):
+    """Сдача экзамена студентом с подсчетом процента и фиксацией попытки"""
+    try:
+        exam = Exam.objects.prefetch_related('questions__answers').get(pk=exam_id)
+    except Exam.DoesNotExist:
+        return Response({'detail': 'Экзамен не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+    user_id = request.data.get('user_id')
+    if not user_id:
+        return Response({'detail': 'user_id обязателен'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.filter(pk=int(user_id)).first()
+    if not user:
+        return Response({'detail': 'Пользователь не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+    prev_attempts = ExamAttempt.objects.filter(user=user, exam=exam).count()
+    if prev_attempts >= exam.max_attempts:
+        return Response({
+            'detail': f'Вы исчерпали лимит попыток ({exam.max_attempts}). Обратитесь к преподавателю.',
+            'limit_reached': True
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    submitted_answers = request.data.get('answers', [])
+    answers_map = {item.get('question_id'): item.get('answer_id') for item in submitted_answers}
+
+    questions = list(exam.questions.all())
+    total_questions = len(questions)
+    correct_count = 0
+
+    for q in questions:
+        chosen_id = answers_map.get(q.id)
+        if chosen_id:
+            correct_ans = q.answers.filter(is_correct=True).first()
+            if correct_ans and correct_ans.id == chosen_id:
+                correct_count += 1
+
+    score = round((correct_count / max(1, total_questions)) * 100) if total_questions else 100
+    passed = score >= exam.passing_score
+
+    attempt = ExamAttempt.objects.create(
+        user=user,
+        exam=exam,
+        score=score,
+        passed=passed,
+        answers_data={'answers': submitted_answers},
+    )
+
+    return Response({
+        'attempt_id': attempt.id,
+        'score': score,
+        'passed': passed,
+        'correct_count': correct_count,
+        'total_questions': total_questions,
+        'passing_score': exam.passing_score,
+        'attempts_used': prev_attempts + 1,
+        'max_attempts': exam.max_attempts,
+        'attempts_left': max(0, exam.max_attempts - (prev_attempts + 1)),
+        'message': '✅ Экзамен успешно сдан!' if passed else '❌ Экзамен не пройден. Попробуйте еще раз.',
+    })
+
+
+# ==========================================
+# 4. КАБИНЕТ ПРЕПОДАВАТЕЛЯ & УПРАВЛЕНИЕ СТУДЕНТАМИ
+# ==========================================
+
+@api_view(['GET'])
+def teacher_dashboard(request):
+    """Сводный дашборд преподавателя (Раздел 20 плана)"""
+    total_students = User.objects.filter(role='student').count()
+    total_groups = StudyGroup.objects.count()
+    total_courses = Course.objects.count()
+    week_ago = timezone.now() - datetime.timedelta(days=7)
+    active_students = User.objects.filter(role='student', last_activity__gte=week_ago).count()
+    completed_enrollments = Enrollment.objects.filter(progress_percentage=100).count()
+
+    return Response({
+        'total_students': total_students,
+        'total_groups': total_groups,
+        'total_courses': total_courses,
+        'active_students': active_students,
+        'completed_courses_count': completed_enrollments,
+    })
+
+
+@api_view(['GET'])
+def teacher_students_list(request):
+    """Список студентов для преподавателя с фильтрами и прогрессом (Раздел 21 плана)"""
+    query = request.query_params.get('q', '').strip()
+    group_id = request.query_params.get('group_id')
+
+    qs = User.objects.filter(role='student').prefetch_related('study_groups', 'enrollments').order_by('id')
+    if query:
+        qs = qs.filter(
+            Q(username__icontains=query) |
+            Q(first_name__icontains=query) |
+            Q(last_name__icontains=query) |
+            Q(email__icontains=query)
+        )
+    if group_id:
+        qs = qs.filter(study_groups__id=group_id)
+
+    result = []
+    for student in qs:
+        primary_group = student.study_groups.first()
+        enrollments = student.enrollments.all()
+        avg_progress = 0
+        if enrollments:
+            avg_progress = round(sum(e.progress_percentage for e in enrollments) / len(enrollments))
+
+        result.append({
+            'id': student.id,
+            'username': student.username,
+            'name': student.name,
+            'first_name': student.first_name,
+            'last_name': student.last_name,
+            'email': student.email,
+            'is_active': student.is_active,
+            'group_id': primary_group.id if primary_group else None,
+            'group_name': primary_group.name if primary_group else 'Без группы',
+            'courses_count': len(enrollments),
+            'avg_progress': avg_progress,
+            'last_activity': student.last_activity,
+            'date_joined': student.date_joined,
+        })
+    return Response(result)
+
+
+@api_view(['GET'])
+def teacher_student_detail(request, student_id):
+    """Подробная карточка студента для преподавателя (Раздел 22 плана)"""
+    try:
+        student = User.objects.prefetch_related(
+            'study_groups',
+            'enrollments__course',
+            'lesson_progresses__lesson__course',
+            'exam_attempts__exam'
+        ).get(pk=student_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'Студент не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+    primary_group = student.study_groups.first()
+
+    courses_data = []
+    for en in student.enrollments.select_related('course').all():
+        course = en.course
+        total_lessons = course.lessons.count()
+        last_progress = StudentLessonProgress.objects.filter(
+            user=student,
+            lesson__course=course,
+            is_completed=True
+        ).order_by('-completed_at').first()
+
+        current_lesson = None
+        if last_progress:
+            next_l = course.lessons.filter(order__gt=last_progress.lesson.order).order_by('order').first()
+            current_lesson = next_l.title if next_l else 'Курс завершен'
+        else:
+            first_l = course.lessons.order_by('order').first()
+            current_lesson = first_l.title if first_l else 'Нет уроков'
+
+        courses_data.append({
+            'course_id': course.id,
+            'course_title': course.title,
+            'progress_percentage': en.progress_percentage,
+            'completed_lessons': en.completed_lessons,
+            'total_lessons': total_lessons,
+            'current_lesson': current_lesson,
+        })
+
+    exams_data = []
+    for attempt in student.exam_attempts.select_related('exam').all():
+        exams_data.append({
+            'exam_id': attempt.exam.id,
+            'exam_title': attempt.exam.title,
+            'score': attempt.score,
+            'passed': attempt.passed,
+            'completed_at': attempt.completed_at,
+        })
+
+    history = []
+    for lp in student.lesson_progresses.filter(is_completed=True).select_related('lesson__course').order_by('-completed_at')[:20]:
+        history.append({
+            'lesson_id': lp.lesson.id,
+            'lesson_title': lp.lesson.title,
+            'course_title': lp.lesson.course.title,
+            'completed_at': lp.completed_at,
+        })
+
+    return Response({
+        'id': student.id,
+        'username': student.username,
+        'name': student.name,
+        'first_name': student.first_name,
+        'last_name': student.last_name,
+        'email': student.email,
+        'is_active': student.is_active,
+        'date_joined': student.date_joined,
+        'last_activity': student.last_activity,
+        'group': {'id': primary_group.id, 'name': primary_group.name} if primary_group else None,
+        'courses': courses_data,
+        'exams': exams_data,
+        'learning_history': history,
+    })
+
+
+@api_view(['POST'])
+def quick_create_student(request):
+    """Быстрое создание студента преподавателем (логин student_XXXX + авто-пароль, Раздел 3 плана)"""
+    serializer = QuickCreateStudentSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    result = serializer.save()
+    return Response(result, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+def reset_student_password(request, student_id):
+    """Сброс пароля студента с выдачей нового (Раздел 21 плана)"""
+    try:
+        student = User.objects.get(pk=student_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'Студент не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+    chars = string.ascii_letters + string.digits
+    new_password = ''.join(random.choices(chars, k=8))
+    student.set_password(new_password)
+    student.save()
+    return Response({
+        'username': student.username,
+        'new_password': new_password,
+        'message': f'Новый пароль для {student.username} успешно создан',
+    })
+
+
+@api_view(['POST'])
+def reset_student_progress(request, student_id):
+    """Сброс прогресса студента по курсу (Раздел 21 плана)"""
+    try:
+        student = User.objects.get(pk=student_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'Студент не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+    course_id = request.data.get('course_id')
+    if course_id:
+        StudentLessonProgress.objects.filter(user=student, lesson__course_id=course_id).delete()
+        Enrollment.objects.filter(user=student, course_id=course_id).update(
+            completed_lessons=0,
+            progress_percentage=0,
+            current_index=0,
+            correct_answers=0
+        )
+    else:
+        StudentLessonProgress.objects.filter(user=student).delete()
+        Enrollment.objects.filter(user=student).update(
+            completed_lessons=0,
+            progress_percentage=0,
+            current_index=0,
+            correct_answers=0
+        )
+    return Response({'status': 'progress_reset', 'student_id': student.id})
+
+
+@api_view(['POST'])
+def toggle_student_status(request, student_id):
+    """Блокировка / разблокировка студента (Раздел 21 плана)"""
+    try:
+        student = User.objects.get(pk=student_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'Студент не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+    student.is_active = not student.is_active
+    student.save()
+    return Response({
+        'student_id': student.id,
+        'is_active': student.is_active,
+        'status_text': 'Активен' if student.is_active else 'Заблокирован'
+    })
+
+
+# ==========================================
+# 5. СИСТЕМА ГРУПП И НАЗНАЧЕНИЕ КУРСОВ
 # ==========================================
 
 @api_view(['GET', 'POST'])
@@ -419,7 +883,6 @@ def groups_list(request):
         )
         return Response(StudyGroupSerializer(group).data, status=status.HTTP_201_CREATED)
 
-    # GET
     teacher_id = request.query_params.get('teacher_id')
     user_id = request.query_params.get('user_id')
 
@@ -453,7 +916,7 @@ def group_add_student(request, group_id):
     except StudyGroup.DoesNotExist:
         return Response({'detail': 'Группа не найдена'}, status=status.HTTP_404_NOT_FOUND)
 
-    student_id = request.data.get('student_id') or request.data.get('userId')
+    student_id = request.data.get('student_id')
     username = request.data.get('username')
 
     student = None
@@ -467,7 +930,7 @@ def group_add_student(request, group_id):
 
     group.students.add(student)
 
-    # Автоматически записываем студента на все назначенные группе курсы
+    # Авто-запись на курсы группы
     for gc in group.group_courses.all():
         Enrollment.objects.get_or_create(user=student, course=gc.course)
 
@@ -483,16 +946,15 @@ def group_remove_student(request, group_id, student_id):
         return Response({'detail': 'Группа или студент не найдены'}, status=status.HTTP_404_NOT_FOUND)
 
     group.students.remove(student)
-    return Response(StudyGroupSerializer(group).data)
+    return Response({'status': 'removed', 'group_id': group.id, 'student_id': student.id})
 
 
 @api_view(['POST'])
 def group_join_by_code(request):
     code = (request.data.get('code') or '').strip().upper()
-    user_id = request.data.get('user_id') or request.data.get('userId')
-
+    user_id = request.data.get('user_id')
     if not code or not user_id:
-        return Response({'detail': 'Код и идентификатор пользователя обязательны'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': 'code и user_id обязательны'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         user = User.objects.get(pk=int(user_id))
@@ -504,7 +966,6 @@ def group_join_by_code(request):
         return Response({'detail': 'Группа с таким кодом не найдена'}, status=status.HTTP_404_NOT_FOUND)
 
     group.students.add(user)
-
     for gc in group.group_courses.all():
         Enrollment.objects.get_or_create(user=user, course=gc.course)
 
@@ -530,42 +991,24 @@ def group_assign_course(request, group_id):
     except Course.DoesNotExist:
         return Response({'detail': 'Курс не найден'}, status=status.HTTP_404_NOT_FOUND)
 
-    group_course, _ = GroupCourse.objects.get_or_create(group=group, course=course)
+    GroupCourse.objects.get_or_create(group=group, course=course)
 
-    # Записываем всех студентов группы на курс
     for student in group.students.all():
         Enrollment.objects.get_or_create(user=student, course=course)
-
-    # Создаем правила доступа к урокам для группы:
-    # 1-й урок открываем сразу, остальные закрыты (Stepik/Cisco модель)
-    lessons = list(course.lessons.all().order_by('order', 'id'))
-    for idx, lesson in enumerate(lessons):
-        is_first = (idx == 0)
-        GroupLessonAccess.objects.get_or_create(
-            group=group,
-            lesson=lesson,
-            defaults={
-                'is_unlocked': is_first,
-                'unlocked_at': timezone.now() if is_first else None,
-                'auto_unlock_when_all_pass': True,
-            },
-        )
 
     return Response({
         'status': 'assigned',
         'group_id': group.id,
         'course_id': course.id,
-        'lessons_count': len(lessons),
     })
 
 
 @api_view(['GET'])
 def group_progress_matrix(request, group_id, course_id):
     """
-    Возвращает для преподавателя полную матрицу успеваемости группы:
-    - список уроков с флагами доступа
+    Матрица успеваемости группы для преподавателя (Раздел 23 плана):
+    - список уроков
     - процент сдачи каждым студентом
-    - процент готовности группы к открытию следующего модуля
     """
     try:
         group = StudyGroup.objects.prefetch_related('students').get(pk=group_id)
@@ -577,11 +1020,6 @@ def group_progress_matrix(request, group_id, course_id):
     total_students = len(students)
     lessons = list(course.lessons.all().order_by('order', 'id'))
 
-    accesses = {
-        gla.lesson_id: gla
-        for gla in GroupLessonAccess.objects.filter(group=group, lesson__in=lessons)
-    }
-
     progress_records = StudentLessonProgress.objects.filter(
         user__in=students,
         lesson__in=lessons,
@@ -592,27 +1030,18 @@ def group_progress_matrix(request, group_id, course_id):
 
     lessons_stats = []
     for idx, lesson in enumerate(lessons):
-        access = accesses.get(lesson.id)
-        is_unlocked = access.is_unlocked if access else (idx == 0)
-        auto_unlock = access.auto_unlock_when_all_pass if access else True
-
         completed_count = sum(1 for s in students if (s.id, lesson.id) in completed_set)
         completion_rate = round((completed_count / max(1, total_students)) * 100) if total_students > 0 else 0
-        all_passed = (completed_count >= total_students) and (total_students > 0)
 
         lessons_stats.append({
             'lesson_id': lesson.id,
             'title': lesson.title,
             'order': lesson.order,
-            'is_unlocked': is_unlocked,
-            'auto_unlock_when_all_pass': auto_unlock,
             'completed_students_count': completed_count,
             'total_students_count': total_students,
             'completion_rate': completion_rate,
-            'all_passed': all_passed,
         })
 
-    # Матрица студентов
     students_matrix = []
     for s in students:
         s_lessons_progress = {}
@@ -645,10 +1074,6 @@ def group_progress_matrix(request, group_id, course_id):
 
 @api_view(['POST'])
 def group_toggle_lesson_access(request, group_id, lesson_id):
-    """
-    Преподаватель принудительно открывает или закрывает урок для группы
-    (или переключает флаг автоматического открытия).
-    """
     try:
         group = StudyGroup.objects.get(pk=group_id)
         lesson = Lesson.objects.get(pk=lesson_id)
@@ -659,16 +1084,11 @@ def group_toggle_lesson_access(request, group_id, lesson_id):
 
     if 'is_unlocked' in request.data:
         access.is_unlocked = bool(request.data['is_unlocked'])
-        if access.is_unlocked:
-            access.unlocked_at = timezone.now()
     else:
-        # Toggle
         access.is_unlocked = not access.is_unlocked
-        if access.is_unlocked:
-            access.unlocked_at = timezone.now()
 
-    if 'auto_unlock_when_all_pass' in request.data:
-        access.auto_unlock_when_all_pass = bool(request.data['auto_unlock_when_all_pass'])
+    if access.is_unlocked:
+        access.unlocked_at = timezone.now()
 
     access.save()
     return Response({
@@ -678,7 +1098,7 @@ def group_toggle_lesson_access(request, group_id, lesson_id):
 
 
 # ==========================================
-# 4. ОБЩИЕ ЭНДПОИНТЫ ЗАПИСИ И ПРОГРЕССА
+# 6. ЗАПИСЬ НА КУРС И СТУДЕНЧЕСКИЙ ПРОГРЕСС
 # ==========================================
 
 @api_view(['POST'])
@@ -710,7 +1130,7 @@ def user_courses(request, user_id):
     enrollments = (
         Enrollment.objects.filter(user=user)
         .select_related('course')
-        .prefetch_related('course__questions', 'course__lessons', 'course__enrollments')
+        .prefetch_related('course__lessons', 'course__blocks')
         .order_by('id')
     )
     return Response([course_list_item(en.course, enrollment=en, enrolled=True) for en in enrollments])
@@ -754,32 +1174,13 @@ def course_progress(request, user_id, course_id):
 
     enrollment, _ = Enrollment.objects.get_or_create(user=user, course=course)
 
-    current_index = request.data.get('currentIndex')
-    if current_index is None:
-        current_index = request.data.get('current_index')
-
-    progress_percentage = request.data.get('progress_percentage')
-    if progress_percentage is None:
-        progress_percentage = request.data.get('progressPercentage')
-
-    correct_answers = request.data.get('correctAnswers')
-    if correct_answers is None:
-        correct_answers = request.data.get('correct_answers')
-
     completed_lessons = request.data.get('completed_lessons')
-    if completed_lessons is None:
-        completed_lessons = request.data.get('completedLessons')
-    if completed_lessons is None and current_index is not None:
-        completed_lessons = current_index
+    progress_percentage = request.data.get('progress_percentage')
 
-    if current_index is not None:
-        enrollment.current_index = max(0, int(current_index))
-    if progress_percentage is not None:
-        enrollment.progress_percentage = min(100, max(0, int(progress_percentage)))
     if completed_lessons is not None:
         enrollment.completed_lessons = max(0, int(completed_lessons))
-    if correct_answers is not None:
-        enrollment.correct_answers = max(0, int(correct_answers))
+    if progress_percentage is not None:
+        enrollment.progress_percentage = min(100, max(0, int(progress_percentage)))
 
     enrollment.save()
 
@@ -788,5 +1189,4 @@ def course_progress(request, user_id, course_id):
         'current_index': enrollment.current_index,
         'progress_percentage': enrollment.progress_percentage,
         'completed_lessons': enrollment.completed_lessons,
-        'correct_answers': enrollment.correct_answers,
     })

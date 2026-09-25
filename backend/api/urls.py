@@ -1,3 +1,4 @@
+# AI-GENERATED: Antigravity
 from django.urls import path
 
 from . import views
@@ -17,7 +18,7 @@ urlpatterns = [
     path('v1/users/<int:user_id>/courses/<int:course_id>/progress', views.course_progress, name='course-progress'),
     path('v1/users/<int:user_id>/courses/<int:course_id>/progress/', views.course_progress, name='course-progress-slash'),
 
-    # Courses & Enroll
+    # Courses & Blocks
     path('v1/enroll', views.enroll, name='enroll'),
     path('v1/enroll/', views.enroll, name='enroll-slash'),
     path('v1/courses', views.course_list, name='course-list'),
@@ -28,6 +29,10 @@ urlpatterns = [
     path('v1/course/<int:course_id>/', views.course_detail, name='course-detail-slash'),
     path('v1/courses/<int:course_id>', views.course_detail, name='courses-detail-plural'),
     path('v1/courses/<int:course_id>/', views.course_detail, name='courses-detail-plural-slash'),
+    path('v1/courses/<int:course_id>/blocks', views.course_blocks, name='course-blocks'),
+    path('v1/courses/<int:course_id>/blocks/', views.course_blocks, name='course-blocks-slash'),
+    path('v1/courses/<int:course_id>/import-markdown', views.course_import_markdown, name='course-import-markdown'),
+    path('v1/courses/<int:course_id>/import-markdown/', views.course_import_markdown, name='course-import-markdown-slash'),
 
     # Lessons
     path('v1/courses/<int:course_id>/lessons', views.course_lessons_create, name='course-lessons-create'),
@@ -37,7 +42,15 @@ urlpatterns = [
     path('v1/lessons/<int:lesson_id>/complete', views.complete_lesson, name='lesson-complete'),
     path('v1/lessons/<int:lesson_id>/complete/', views.complete_lesson, name='lesson-complete-slash'),
 
-    # Groups & Stepik/Cisco Gating
+    # Exams
+    path('v1/blocks/<int:block_id>/exam', views.block_exam, name='block-exam'),
+    path('v1/blocks/<int:block_id>/exam/', views.block_exam, name='block-exam-slash'),
+    path('v1/exams/<int:exam_id>', views.exam_detail, name='exam-detail'),
+    path('v1/exams/<int:exam_id>/', views.exam_detail, name='exam-detail-slash'),
+    path('v1/exams/<int:exam_id>/submit', views.exam_submit, name='exam-submit'),
+    path('v1/exams/<int:exam_id>/submit/', views.exam_submit, name='exam-submit-slash'),
+
+    # Groups
     path('v1/groups', views.groups_list, name='groups-list'),
     path('v1/groups/', views.groups_list, name='groups-list-slash'),
     path('v1/groups/join', views.group_join_by_code, name='group-join'),
@@ -54,4 +67,20 @@ urlpatterns = [
     path('v1/groups/<int:group_id>/progress/<int:course_id>/', views.group_progress_matrix, name='group-progress-matrix-slash'),
     path('v1/groups/<int:group_id>/lessons/<int:lesson_id>/toggle-access', views.group_toggle_lesson_access, name='group-toggle-lesson-access'),
     path('v1/groups/<int:group_id>/lessons/<int:lesson_id>/toggle-access/', views.group_toggle_lesson_access, name='group-toggle-lesson-access-slash'),
+
+    # Teacher Dashboard & Management
+    path('v1/teacher/dashboard', views.teacher_dashboard, name='teacher-dashboard'),
+    path('v1/teacher/dashboard/', views.teacher_dashboard, name='teacher-dashboard-slash'),
+    path('v1/teacher/students', views.teacher_students_list, name='teacher-students-list'),
+    path('v1/teacher/students/', views.teacher_students_list, name='teacher-students-list-slash'),
+    path('v1/teacher/students/quick-create', views.quick_create_student, name='quick-create-student'),
+    path('v1/teacher/students/quick-create/', views.quick_create_student, name='quick-create-student-slash'),
+    path('v1/teacher/students/<int:student_id>', views.teacher_student_detail, name='teacher-student-detail'),
+    path('v1/teacher/students/<int:student_id>/', views.teacher_student_detail, name='teacher-student-detail-slash'),
+    path('v1/teacher/students/<int:student_id>/reset-password', views.reset_student_password, name='reset-student-password'),
+    path('v1/teacher/students/<int:student_id>/reset-password/', views.reset_student_password, name='reset-student-password-slash'),
+    path('v1/teacher/students/<int:student_id>/reset-progress', views.reset_student_progress, name='reset-student-progress'),
+    path('v1/teacher/students/<int:student_id>/reset-progress/', views.reset_student_progress, name='reset-student-progress-slash'),
+    path('v1/teacher/students/<int:student_id>/toggle-status', views.toggle_student_status, name='toggle-student-status'),
+    path('v1/teacher/students/<int:student_id>/toggle-status/', views.toggle_student_status, name='toggle-student-status-slash'),
 ]

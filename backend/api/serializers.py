@@ -1,12 +1,18 @@
+# AI-GENERATED: Antigravity
 import base64
 import binascii
+import random
+import string
 
 from rest_framework import serializers
 
 from .models import (
     Answer,
     Course,
+    CourseBlock,
     Enrollment,
+    Exam,
+    ExamAttempt,
     GroupCourse,
     GroupLessonAccess,
     Lesson,
@@ -23,13 +29,18 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'name', 'email', 'avatar_url', 'role', 'is_teacher_or_admin', 'is_staff']
+        fields = [
+            'id', 'username', 'name', 'first_name', 'last_name', 'email',
+            'avatar_url', 'role', 'is_teacher_or_admin', 'is_staff', 'last_activity'
+        ]
 
 
 class RegisterSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=6)
+    first_name = serializers.CharField(max_length=150, required=False, default='')
+    last_name = serializers.CharField(max_length=150, required=False, default='')
     role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default='student', required=False)
 
     def validate_username(self, value):
@@ -65,9 +76,11 @@ class LoginSerializer(serializers.Serializer):
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['username', 'email', 'avatar_url', 'role']
+        fields = ['username', 'first_name', 'last_name', 'email', 'avatar_url', 'role']
         extra_kwargs = {
             'username': {'required': False},
+            'first_name': {'required': False},
+            'last_name': {'required': False},
             'email': {'required': False},
             'avatar_url': {'required': False, 'allow_null': True},
             'role': {'required': False},
@@ -110,6 +123,13 @@ class AnswerSerializer(serializers.ModelSerializer):
         fields = ['id', 'text', 'is_correct']
 
 
+class StudentAnswerSerializer(serializers.ModelSerializer):
+    """Скрывает правильный ответ для студента во время тестирования"""
+    class Meta:
+        model = Answer
+        fields = ['id', 'text']
+
+
 class AnswerInputSerializer(serializers.Serializer):
     text = serializers.CharField()
     is_correct = serializers.BooleanField(default=False)
@@ -120,73 +140,187 @@ class QuestionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Question
-        fields = ['id', 'text', 'answers', 'lesson_id']
+        fields = ['id', 'text', 'answers', 'lesson_id', 'exam_id']
+
+
+class StudentQuestionSerializer(serializers.ModelSerializer):
+    answers = StudentAnswerSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Question
+        fields = ['id', 'text', 'answers']
 
 
 class QuestionInputSerializer(serializers.Serializer):
     text = serializers.CharField()
     lesson_id = serializers.IntegerField(required=False, allow_null=True)
+    exam_id = serializers.IntegerField(required=False, allow_null=True)
     answers = AnswerInputSerializer(many=True, required=False, default=list)
+
+
+class ExamSerializer(serializers.ModelSerializer):
+    questions_count = serializers.IntegerField(source='questions.count', read_only=True)
+    block_title = serializers.CharField(source='block.title', read_only=True, default='')
+
+    class Meta:
+        model = Exam
+        fields = [
+            'id', 'course_id', 'block_id', 'block_title', 'title',
+            'description', 'passing_score', 'max_attempts', 'questions_count', 'created_at'
+        ]
+
+
+class ExamDetailSerializer(serializers.ModelSerializer):
+    questions = serializers.SerializerMethodField()
+    block_title = serializers.CharField(source='block.title', read_only=True, default='')
+
+    class Meta:
+        model = Exam
+        fields = [
+            'id', 'course_id', 'block_id', 'block_title', 'title',
+            'description', 'passing_score', 'max_attempts', 'questions', 'created_at'
+        ]
+
+    def get_questions(self, obj):
+        request = self.context.get('request')
+        is_teacher = request and request.user.is_authenticated and (request.user.is_teacher_or_admin)
+        if is_teacher:
+            return QuestionSerializer(obj.questions.all(), many=True).data
+        return StudentQuestionSerializer(obj.questions.all(), many=True).data
+
+
+class ExamAttemptSerializer(serializers.ModelSerializer):
+    exam_title = serializers.CharField(source='exam.title', read_only=True)
+    user_name = serializers.CharField(source='user.name', read_only=True)
+
+    class Meta:
+        model = ExamAttempt
+        fields = ['id', 'user_id', 'user_name', 'exam_id', 'exam_title', 'score', 'passed', 'completed_at']
 
 
 class LessonSerializer(serializers.ModelSerializer):
     course_id = serializers.IntegerField(source='course.id', read_only=True)
+    block_title = serializers.CharField(source='block.title', read_only=True, default=None)
     questions = QuestionSerializer(many=True, read_only=True)
 
     class Meta:
         model = Lesson
-        fields = ['id', 'course_id', 'title', 'description', 'content', 'order', 'questions', 'created_at']
+        fields = [
+            'id', 'course_id', 'block_id', 'block_title', 'title', 'description',
+            'content', 'lesson_type', 'is_mandatory', 'order', 'questions', 'created_at'
+        ]
+
+
+class CourseBlockSerializer(serializers.ModelSerializer):
+    lessons = LessonSerializer(many=True, read_only=True)
+    exam = ExamSerializer(read_only=True)
+    lessons_count = serializers.IntegerField(source='lessons.count', read_only=True)
+
+    class Meta:
+        model = CourseBlock
+        fields = ['id', 'course_id', 'title', 'description', 'order', 'lessons_count', 'lessons', 'exam', 'created_at']
 
 
 class CourseSerializer(serializers.ModelSerializer):
     author_id = serializers.IntegerField(source='author.id', read_only=True, allow_null=True)
+    author_name = serializers.CharField(source='author.name', read_only=True, default='')
     lessons_count = serializers.IntegerField(source='lessons.count', read_only=True)
+    blocks_count = serializers.IntegerField(source='blocks.count', read_only=True)
 
     class Meta:
         model = Course
-        fields = ['id', 'title', 'description', 'price', 'rating', 'author_id', 'content', 'course_type', 'lessons_count', 'created_at']
+        fields = [
+            'id', 'title', 'description', 'price', 'rating', 'category', 'level',
+            'status', 'cover_image', 'author_id', 'author_name', 'content', 'course_type',
+            'blocks_count', 'lessons_count', 'created_at'
+        ]
 
 
-class CourseWithQuestionsSerializer(serializers.ModelSerializer):
-    questions = QuestionSerializer(many=True, read_only=True)
+class CourseWithDetailsSerializer(serializers.ModelSerializer):
+    blocks = CourseBlockSerializer(many=True, read_only=True)
     lessons = LessonSerializer(many=True, read_only=True)
     author_id = serializers.IntegerField(source='author.id', read_only=True, allow_null=True)
+    author_name = serializers.CharField(source='author.name', read_only=True, default='')
 
     class Meta:
         model = Course
-        fields = ['id', 'title', 'description', 'price', 'rating', 'author_id', 'content', 'course_type', 'questions', 'lessons']
+        fields = [
+            'id', 'title', 'description', 'price', 'rating', 'category', 'level',
+            'status', 'cover_image', 'author_id', 'author_name', 'content', 'course_type',
+            'blocks', 'lessons'
+        ]
 
 
 class CourseCreateSerializer(serializers.ModelSerializer):
-    questions = QuestionInputSerializer(many=True, required=False, default=list)
     author_id = serializers.IntegerField(required=False, allow_null=True)
-    content = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    course_type = serializers.CharField(required=False, default='quiz')
+    category = serializers.CharField(required=False, default='Программирование')
+    level = serializers.CharField(required=False, default='beginner')
+    status = serializers.CharField(required=False, default='published')
+    cover_image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Course
-        fields = ['id', 'title', 'description', 'price', 'author_id', 'content', 'course_type', 'questions']
+        fields = [
+            'id', 'title', 'description', 'price', 'author_id', 'category',
+            'level', 'status', 'cover_image', 'content', 'course_type'
+        ]
         read_only_fields = ['id']
 
     def create(self, validated_data):
-        questions = validated_data.pop('questions', [])
         author_id = validated_data.pop('author_id', None)
         if author_id:
             validated_data['author'] = User.objects.filter(pk=author_id).first()
+        return Course.objects.create(**validated_data)
 
-        if validated_data.get('content') and not questions:
-            validated_data['course_type'] = 'text'
 
-        course = Course.objects.create(**validated_data)
-        for q_data in questions:
-            answers = q_data.pop('answers', [])
-            lesson_id = q_data.pop('lesson_id', None)
-            lesson = Lesson.objects.filter(pk=lesson_id, course=course).first() if lesson_id else None
-            question = Question.objects.create(course=course, lesson=lesson, **q_data)
-            Answer.objects.bulk_create([
-                Answer(question=question, **answer_data) for answer_data in answers
-            ])
-        return course
+class QuickCreateStudentSerializer(serializers.Serializer):
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+    group_id = serializers.IntegerField(required=False, allow_null=True)
+
+    def create(self, validated_data):
+        first_name = validated_data['first_name'].strip()
+        last_name = validated_data['last_name'].strip()
+        group_id = validated_data.get('group_id')
+
+        # Генерируем уникальный логин student_XXXX
+        for _ in range(100):
+            num = random.randint(1000, 9999)
+            username = f'student_{num}'
+            if not User.objects.filter(username=username).exists():
+                break
+        else:
+            username = f'student_{random.randint(10000, 99999)}'
+
+        # Генерируем читаемый надежный пароль
+        chars = string.ascii_letters + string.digits
+        password = ''.join(random.choices(chars, k=8))
+        email = f'{username}@steplearn.local'
+
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            first_name=first_name,
+            last_name=last_name,
+            role='student',
+        )
+
+        group = None
+        if group_id:
+            group = StudyGroup.objects.filter(pk=group_id).first()
+            if group:
+                group.students.add(user)
+
+        return {
+            'user': UserSerializer(user).data,
+            'username': username,
+            'password': password,
+            'first_name': first_name,
+            'last_name': last_name,
+            'group_id': group.id if group else None,
+            'group_name': group.name if group else None,
+        }
 
 
 class EnrollmentProgressSerializer(serializers.Serializer):

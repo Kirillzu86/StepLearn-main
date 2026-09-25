@@ -1,10 +1,14 @@
+# AI-GENERATED: Antigravity
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
 from .models import (
     Answer,
     Course,
+    CourseBlock,
     Enrollment,
+    Exam,
+    ExamAttempt,
     GroupCourse,
     GroupLessonAccess,
     Lesson,
@@ -17,9 +21,9 @@ from .models import (
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
-    list_display = ('id', 'username', 'email', 'role', 'is_staff', 'is_active')
+    list_display = ('id', 'username', 'email', 'role', 'last_activity', 'is_staff', 'is_active')
     list_filter = ('role', 'is_staff', 'is_active')
-    search_fields = ('username', 'email')
+    search_fields = ('username', 'email', 'first_name', 'last_name')
     fieldsets = UserAdmin.fieldsets + (
         ('StepLearn', {'fields': ('avatar_url', 'role')}),
     )
@@ -38,28 +42,50 @@ class QuestionInline(admin.StackedInline):
 class LessonInline(admin.TabularInline):
     model = Lesson
     extra = 1
+    fields = ('order', 'block', 'title', 'lesson_type', 'is_mandatory')
+
+
+class CourseBlockInline(admin.TabularInline):
+    model = CourseBlock
+    extra = 1
     fields = ('order', 'title', 'description')
 
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
-    list_display = ('id', 'title', 'price', 'rating')
+    list_display = ('id', 'title', 'category', 'level', 'status', 'rating')
+    list_filter = ('category', 'level', 'status')
     search_fields = ('title', 'description')
-    inlines = [LessonInline, QuestionInline]
+    inlines = [CourseBlockInline, LessonInline]
+
+
+@admin.register(CourseBlock)
+class CourseBlockAdmin(admin.ModelAdmin):
+    list_display = ('id', 'course', 'order', 'title', 'created_at')
+    list_filter = ('course',)
+    search_fields = ('title', 'description')
 
 
 @admin.register(Lesson)
 class LessonAdmin(admin.ModelAdmin):
-    list_display = ('id', 'course', 'order', 'title', 'created_at')
-    list_filter = ('course',)
+    list_display = ('id', 'course', 'block', 'order', 'title', 'lesson_type', 'is_mandatory', 'created_at')
+    list_filter = ('course', 'block', 'lesson_type', 'is_mandatory')
     search_fields = ('title', 'description', 'content')
+
+
+@admin.register(Exam)
+class ExamAdmin(admin.ModelAdmin):
+    list_display = ('id', 'title', 'course', 'block', 'passing_score', 'max_attempts', 'created_at')
+    list_filter = ('course',)
+    search_fields = ('title', 'description')
+    inlines = [QuestionInline]
 
 
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
-    list_display = ('id', 'course', 'lesson', 'text')
+    list_display = ('id', 'course', 'lesson', 'exam', 'text')
     search_fields = ('text',)
-    list_filter = ('course',)
+    list_filter = ('course', 'exam')
     inlines = [AnswerInline]
 
 
@@ -67,6 +93,13 @@ class QuestionAdmin(admin.ModelAdmin):
 class AnswerAdmin(admin.ModelAdmin):
     list_display = ('id', 'question', 'text', 'is_correct')
     list_filter = ('is_correct',)
+
+
+@admin.register(ExamAttempt)
+class ExamAttemptAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'exam', 'score', 'passed', 'completed_at')
+    list_filter = ('passed', 'exam')
+    search_fields = ('user__username', 'exam__title')
 
 
 @admin.register(Enrollment)
